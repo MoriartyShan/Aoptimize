@@ -10,9 +10,9 @@
 #include <Eigen/Core>
 #include <opencv2/opencv.hpp>
 
-#define XP 5
+#define XP 7
 #define YP 1
-#define ZP 1
+#define ZP 7
 
 class Zerror {
 private:
@@ -139,96 +139,63 @@ int main() {
   ceres::Problem problem;
   double r_vec[3] = {1, 0, 0};
 #if 1
-  zpoints.emplace_back(std::array<double, 3>({ -2.22685, -3.00641, 14.3505 }));
-  zpoints.emplace_back(std::array<double, 3>({ -2.34249, -1.73752, 14.9136 })); 
-  zpoints.emplace_back(std::array<double, 3>({ 0.647695, -1.68376, 14.7771 }));
-  zpoints.emplace_back(std::array<double, 3>({ 0.644386, -2.99821, 14.5515 }));
-  zpoints.emplace_back(std::array<double, 3>({ 4.14688, -3.09886, 15.8304 }));
-  zpoints.emplace_back(std::array<double, 3>({ 3.94199, -1.63197, 14.7113 }));
-  zpoints.emplace_back(std::array<double, 3>({ 6.71896, -1.6101, 14.5443 }));
-  zpoints.emplace_back(std::array<double, 3>({ 6.90355, -3.01945, 15.3327 }));
-  auto zcostfunc1 = Zerror::Create(zpoints);
-  problem.AddResidualBlock(zcostfunc1, new ceres::TrivialLoss(), r_vec);
-
-  xpoints.emplace_back(std::array<double, 3>({ -2.22685, -3.00641, 14.3505 }));
-  xpoints.emplace_back(std::array<double, 3>({ -2.34249, -1.73752, 14.9136 }));
-  auto xcostfunc1 = Xerror::Create(xpoints);
-  problem.AddResidualBlock(xcostfunc1, new ceres::TrivialLoss(), r_vec);
-
-  xpoints.clear();
-  xpoints.emplace_back(std::array<double, 3>({ 0.647695, -1.68376, 14.7771 }));
-  xpoints.emplace_back(std::array<double, 3>({ 0.644386, -2.99821, 14.5515 }));
-  xcostfunc1 = Xerror::Create(xpoints);
-  problem.AddResidualBlock(xcostfunc1, new ceres::TrivialLoss(), r_vec);
-
-  xpoints.clear();
-  xpoints.emplace_back(std::array<double, 3>({ 4.14688, -3.09886, 15.8304 }));
-  xpoints.emplace_back(std::array<double, 3>({ 3.94199, -1.63197, 14.7113 }));
-  xcostfunc1 = Xerror::Create(xpoints);
-  problem.AddResidualBlock(xcostfunc1, new ceres::TrivialLoss(), r_vec);
-
-  xpoints.clear();
-  xpoints.emplace_back(std::array<double, 3>({ 6.71896, -1.6101, 14.5443 }));
-  xpoints.emplace_back(std::array<double, 3>({ 6.90355, -3.01945, 15.3327 }));
-  xcostfunc1 = Xerror::Create(xpoints);
-  problem.AddResidualBlock(xcostfunc1, new ceres::TrivialLoss(), r_vec);
-
-
-  ypoints.emplace_back(std::array<double, 3>({ -2.34249, -1.73752, 14.9136 }));
-  ypoints.emplace_back(std::array<double, 3>({ 0.647695, -1.68376, 14.7771 }));
-  ypoints.emplace_back(std::array<double, 3>({ 3.94199, -1.63197, 14.7113 }));
-  ypoints.emplace_back(std::array<double, 3>({ 6.71896, -1.6101, 14.5443 }));
+  ypoints.emplace_back(std::array<double, 3>({ 1.56694, 1.23576, 8.09722 }));
+  ypoints.emplace_back(std::array<double, 3>({ 1.61549, 1.17857, 4.253 }));
+  ypoints.emplace_back(std::array<double, 3>({ 1.83658, 1.16982, 4.30788 }));
+  ypoints.emplace_back(std::array<double, 3>({ 1.63993, 1.12446, 7.39286 }));
+  ypoints.emplace_back(std::array<double, 3>({ -1.6854, 1.51227, 11.4332 }));
+  ypoints.emplace_back(std::array<double, 3>({ -1.47764, 1.41993, 5.23161 }));
+  ypoints.emplace_back(std::array<double, 3>({ -1.36112, 1.46405, 5.39199 }));
+  ypoints.emplace_back(std::array<double, 3>({ -1.46795, 1.43467, 11.004 }));
   auto ycostfunc = Yerror::Create(ypoints);
-  problem.AddResidualBlock(ycostfunc, new ceres::TrivialLoss(), r_vec);
+  problem.AddResidualBlock(ycostfunc, nullptr, r_vec);
 
-  ypoints.clear();
-  ypoints.emplace_back(std::array<double, 3>({ -2.22685, -3.00641, 14.3505 }));
-  ypoints.emplace_back(std::array<double, 3>({ 0.644386, -2.99821, 14.5515 }));
-  ypoints.emplace_back(std::array<double, 3>({ 4.14688, -3.09886, 15.8304 }));
-  ypoints.emplace_back(std::array<double, 3>({ 6.90355, -3.01945, 15.3327 }));
-  ycostfunc = Yerror::Create(ypoints);
-  problem.AddResidualBlock(ycostfunc, new ceres::TrivialLoss(), r_vec);
-
-  ///split two test
-  ypoints.clear();
-  ypoints.emplace_back(std::array<double, 3>({ 0.986761, 3.0441, 9.12497 }));
-  ypoints.emplace_back(std::array<double, 3>({ 1.1901, 2.36408, 5.58576 }));
-  ypoints.emplace_back(std::array<double, 3>({ 1.37157, 2.3098, 5.51177 }));
-  ypoints.emplace_back(std::array<double, 3>({ 1.24182, 3.14053, 9.45639 }));
-  ypoints.emplace_back(std::array<double, 3>({ -2.49757, 4.16068, 13.5848 }));
-  ypoints.emplace_back(std::array<double, 3>({ -2.25602, 2.95318, 7.29003 }));
-  ycostfunc = Yerror::Create(ypoints);
-  problem.AddResidualBlock(ycostfunc, new ceres::TrivialLoss(), r_vec);
+  xpoints.emplace_back(std::array<double, 3>({ 1.56694, 1.23576, 8.09722 }));
+  xpoints.emplace_back(std::array<double, 3>({ 1.61549, 1.17857, 4.253 }));
+  auto xcostfunc = Xerror::Create(xpoints);
+  problem.AddResidualBlock(xcostfunc, nullptr, r_vec);
 
   xpoints.clear();
-  xpoints.emplace_back(std::array<double, 3>({ 0.986761, 3.0441, 9.12497 }));
-  xpoints.emplace_back(std::array<double, 3>({ 1.1901, 2.36408, 5.58576 }));
-  xcostfunc1 = Xerror::Create(xpoints);
-  problem.AddResidualBlock(xcostfunc1, new ceres::TrivialLoss(), r_vec);
+  xpoints.emplace_back(std::array<double, 3>({ 1.83658, 1.16982, 4.30788 }));
+  xpoints.emplace_back(std::array<double, 3>({ 1.63993, 1.12446, 7.39286 }));
+  xcostfunc = Xerror::Create(xpoints);
+  problem.AddResidualBlock(xcostfunc, nullptr, r_vec);
 
   xpoints.clear();
-  xpoints.emplace_back(std::array<double, 3>({ 1.37157, 2.3098, 5.51177 }));
-  xpoints.emplace_back(std::array<double, 3>({ 1.24182, 3.14053, 9.45639 }));
-  auto xcostfunc2 = Xerror::Create(xpoints);
-  problem.AddResidualBlock(xcostfunc2, new ceres::TrivialLoss(), r_vec);
+  xpoints.emplace_back(std::array<double, 3>({ -1.6854, 1.51227, 11.4332 }));
+  xpoints.emplace_back(std::array<double, 3>({ -1.47764, 1.41993, 5.23161 }));
+  xcostfunc = Xerror::Create(xpoints);
+  problem.AddResidualBlock(xcostfunc, nullptr, r_vec);
 
   xpoints.clear();
-  xpoints.emplace_back(std::array<double, 3>({ -2.49757, 4.16068, 13.5848 }));
-  xpoints.emplace_back(std::array<double, 3>({ -2.25602, 2.95318, 7.29003 }));
-  auto xcostfunc3 = Xerror::Create(xpoints);
-  problem.AddResidualBlock(xcostfunc3, new ceres::TrivialLoss(), r_vec);
+  xpoints.emplace_back(std::array<double, 3>({ -1.36112, 1.46405, 5.39199 }));
+  xpoints.emplace_back(std::array<double, 3>({ -1.46795, 1.43467, 11.004 }));
+  xcostfunc = Xerror::Create(xpoints);
+  problem.AddResidualBlock(xcostfunc, nullptr, r_vec);
+
+  zpoints.emplace_back(std::array<double, 3>({ 1.56694, 1.23576, 8.09722 }));
+  zpoints.emplace_back(std::array<double, 3>({ 1.63993, 1.12446, 7.39286 }));
+  auto zcostfunc = Zerror::Create(zpoints);
+  problem.AddResidualBlock(zcostfunc, nullptr, r_vec);
 
   zpoints.clear();
-  zpoints.emplace_back(std::array<double, 3>({ 1.1901, 2.36408, 5.58576 }));
-  zpoints.emplace_back(std::array<double, 3>({ 1.37157, 2.3098, 5.51177 }));
-  zcostfunc1 = Zerror::Create(zpoints);
-  problem.AddResidualBlock(zcostfunc1, new ceres::TrivialLoss(), r_vec);
+  zpoints.emplace_back(std::array<double, 3>({ 1.61549, 1.17857, 4.253 }));
+  zpoints.emplace_back(std::array<double, 3>({ 1.83658, 1.16982, 4.30788 }));
+  zcostfunc = Zerror::Create(zpoints);
+  problem.AddResidualBlock(zcostfunc, nullptr, r_vec);
 
   zpoints.clear();
-  zpoints.emplace_back(std::array<double, 3>({ 0.986761, 3.0441, 9.12497 }));
-  zpoints.emplace_back(std::array<double, 3>({ 1.24182, 3.14053, 9.45639 }));
-  auto zcostfunc2 = Zerror::Create(zpoints);
-  problem.AddResidualBlock(zcostfunc2, new ceres::TrivialLoss(), r_vec);
+  zpoints.emplace_back(std::array<double, 3>({ -1.6854, 1.51227, 11.4332 }));
+  zpoints.emplace_back(std::array<double, 3>({ -1.46795, 1.43467, 11.004 }));
+  zcostfunc = Zerror::Create(zpoints);
+  problem.AddResidualBlock(zcostfunc, nullptr, r_vec);
+
+  zpoints.clear();
+  zpoints.emplace_back(std::array<double, 3>({ -1.47764, 1.41993, 5.23161 }));
+  zpoints.emplace_back(std::array<double, 3>({ -1.36112, 1.46405, 5.39199 }));
+  zcostfunc = Zerror::Create(zpoints);
+  problem.AddResidualBlock(zcostfunc, nullptr, r_vec);
+
 #endif
   std::cout << "resudual number = " << problem.NumResidualBlocks() << "," << problem.NumResiduals() << std::endl;
 
@@ -245,26 +212,15 @@ int main() {
   LOG(ERROR) << "Get R:\n" << R;
 
 
-  all.emplace_back(std::array<double, 3>({ -2.22685, -3.00641, 14.3505 }));
-  all.emplace_back(std::array<double, 3>({ -2.34249, -1.73752, 14.9136 }));
-  all.emplace_back(std::array<double, 3>({ 0.647695, -1.68376, 14.7771 }));
-  all.emplace_back(std::array<double, 3>({ 0.644386, -2.99821, 14.5515 }));
-  all.emplace_back(std::array<double, 3>({ 4.14688, -3.09886, 15.8304 }));
-  all.emplace_back(std::array<double, 3>({ 3.94199, -1.63197, 14.7113 }));
-  all.emplace_back(std::array<double, 3>({ 6.71896, -1.6101, 14.5443 }));
-  all.emplace_back(std::array<double, 3>({ 6.90355, -3.01945, 15.3327 }));
-  all.emplace_back(std::array<double, 3>({ 0.986761, 3.0441, 9.12497 }));
-  all.emplace_back(std::array<double, 3>({ 1.1901, 2.36408, 5.58576 }));
-  all.emplace_back(std::array<double, 3>({ 1.37157, 2.3098, 5.51177 }));
-  all.emplace_back(std::array<double, 3>({ 1.24182, 3.14053, 9.45639 }));
-  all.emplace_back(std::array<double, 3>({ -2.49757, 4.16068, 13.5848 }));
-  all.emplace_back(std::array<double, 3>({ -2.25602, 2.95318, 7.29003 }));
-  all.emplace_back(std::array<double, 3>({ 1.01403, 2.10141, 5.04859 }));
+  all = ypoints;
+  double y_norm = 0;
   for (int i = 0; i < all.size(); i++) {
     cv::Matx31d p(all[i][0], all[i][1], all[i][2]);
-    LOG(ERROR) << p.t() << "-" << (R * p).t();
+    cv::Mat cp = (R * p).t();
+    LOG(ERROR) << p.t() << "-" << cp;
+    y_norm += cp.at<double>(0, 1);
   }
-
+  LOG(ERROR) << "y = " << y_norm / all.size();
   system("pause");
   return 0;
 }
