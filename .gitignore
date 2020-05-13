@@ -1,0 +1,15 @@
+/Debug/*
+/Release/*
+/x64/*
+/BoardDetect/*.txt
+/BoardDetect/*.png
+/*/x64/*
+/*/Debug/*
+/*/Release/*
+/.vs/*
+/BoardDetect/images/*
+/BoardDetect/someresult/*
+/images/*
+/CMakeBuild/*
+/build/*
+/.idea/*
