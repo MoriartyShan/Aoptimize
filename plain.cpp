@@ -4,6 +4,36 @@
 #include <opencv2/opencv.hpp>
 #include "../Common/camera.h"
 
+std::string toString(double *matrix) {
+  std::stringstream matrix_string;
+  matrix_string.precision(8);
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 3; j++) {
+      matrix_string << matrix[i * 3 + j] << ",";
+    }
+    matrix_string << "\n";
+  }
+  return matrix_string.str();
+}
+
+template<typename T>
+void GetPoint3d(const T* m_matrix, const T* uv, const T h, T* p3d) {
+
+#define IDX(r, c) ((r) * 3 + (c))
+  T a = m_matrix[IDX(1, 0)] - m_matrix[IDX(2, 0)] * uv[1];
+  T b = m_matrix[IDX(1, 2)] - m_matrix[IDX(2, 2)] * uv[1];
+  T c = m_matrix[IDX(2, 1)] * uv[1] - m_matrix[IDX(1, 1)] * h;
+  T m = m_matrix[IDX(0, 0)] - m_matrix[IDX(2, 0)] * uv[0];
+  T n = m_matrix[IDX(0, 2)] - m_matrix[IDX(2, 2)] * uv[0];
+  T p = m_matrix[IDX(2, 1)] * uv[0] - m_matrix[IDX(0, 1)] * h;
+
+  //MLOG() << "[a, b, c, m, n, p] = [" << a << "," << b << "," << c << "," << m << "," << n << "," << p << "]";
+
+  p3d[1] = (c / a - (p / m)) / (b / a - (n / m));
+  p3d[0] = (c / b - p / n) / (a / b - m / n);
+  p3d[2] = m_matrix[IDX(2, 0)] * p3d[0] + m_matrix[IDX(2, 2)] * p3d[1] + m_matrix[IDX(2, 1)] * h;
+#undef IDX
+}
 
 cv::Matx31d get_point3d(const cv::Matx33d &m_Matrix, const cv::Point2d& p2d, const double height) {
   using T = double;
@@ -68,6 +98,7 @@ void InsertMatrixToPointer(const cv::Matx33d &m, T *elem) {
 // a line that all points' z value is different
 class ZLine {
 private:
+  static int seq;
   std::vector<cv::Point2d> points;
   cv::Matx33d _cameraK;
 public:
@@ -80,60 +111,49 @@ public:
     _cameraK = cameraK;
     points = _points;
   };
+
   template <typename T>
   bool operator()(const T* const aim, T* residuals) const {
     std::vector<std::array<T, 2>> psz(points.size());
     T Cam_R_Car[9], cameraK[9], m_matrix[9];
     std::array<T, 2> average = { (T)0 };;
-    ceres::MatrixAdapter<T, 3, 1> m_Matrix(m_matrix);
+    ceres::MatrixAdapter<T, 3, 1> m_Matrix(m_matrix), Cam_R_Car_M(Cam_R_Car);
    
-    ceres::AngleAxisToRotationMatrix(aim, Cam_R_Car);
+    ceres::AngleAxisToRotationMatrix(aim, Cam_R_Car_M);
     InsertMatrixToPointer(_cameraK, cameraK);
     MatrixMulti(cameraK, Cam_R_Car, m_matrix);
 
     for (int i = 0; i < points.size(); i++) {
       T uv[2] = {(T)points[i].x, (T)points[i].y};
-      T a = m_Matrix(1, 0) - m_Matrix(2, 0) * uv[1];
-      T b = m_Matrix(1, 2) - m_Matrix(2, 2) * uv[1];
-      T c = m_Matrix(2, 1) * uv[1] - m_Matrix(1, 1) * aim[3];
-
-      T m = m_Matrix(0, 0) - m_Matrix(2, 0) * uv[0];
-      T n = m_Matrix(0, 2) - m_Matrix(2, 2) * uv[0];
-      T p = m_Matrix(2, 1) * uv[0] - m_Matrix(0, 1) * aim[3];
-
-      T c_a = c / a, b_a = b / a;
-
-      psz[i][1] = (c_a - (p / m)) / (b_a - (n / m));
-      psz[i][0] = c_a - b_a * psz[i][1];
-
+      T p3d[3];
+      GetPoint3d(m_matrix, uv, aim[3], p3d);
+      psz[i][1] = p3d[1];
+      psz[i][0] = p3d[0];
       average[0] += psz[i][0];
       average[1] += psz[i][1];
     }
     average[0] /= (T)points.size();
     average[1] /= (T)points.size();
-
     auto dev = GetDeviation(psz, average);
-
-    residuals[0] = dev[0];
-    //residuals[1] = dev[1];
-    //LOG(ERROR) << residuals[0] << "-" << residuals[1];
+    residuals[0] = ceres::sqrt(dev[0]);
     return true;
   };
 };
-
+int ZLine::seq = 0;
 class ZLineDistance {
 private:
   std::vector<cv::Point2d> _line1;
   std::vector<cv::Point2d> _line2;
   cv::Matx33d _cameraK;
   double _distance;
+  static int seq;
 public:
   static ceres::CostFunction* Create(
       const cv::Matx33d& cameraK,
       const double distance,
       const std::vector<cv::Point2d>& line1,
       const std::vector<cv::Point2d>& line2) {
-    return (new ceres::AutoDiffCostFunction<ZLineDistance, 2, 4>(
+    return (new ceres::AutoDiffCostFunction<ZLineDistance, 1, 4>(
       new ZLineDistance(cameraK, distance, line1, line2)));
   }
 
@@ -147,14 +167,15 @@ public:
     _line1 = line1;
     _line2 = line2;
   };
+  
   template <typename T>
   bool operator()(const T* const aim, T* residuals) const {
     std::vector<std::array<T, 2>> line1(_line1.size());
     std::vector<std::array<T, 2>> line2(_line2.size());
     T Cam_R_Car[9], cameraK[9], m_matrix[9];
-    ceres::MatrixAdapter<T, 3, 1> m_Matrix(m_matrix);
+    ceres::MatrixAdapter<T, 3, 1> m_Matrix(m_matrix), Cam_R_Car_Matrix(Cam_R_Car);
 
-    ceres::AngleAxisToRotationMatrix(aim, Cam_R_Car);
+    ceres::AngleAxisToRotationMatrix(aim, Cam_R_Car_Matrix);
     InsertMatrixToPointer(_cameraK, cameraK);
     MatrixMulti(cameraK, Cam_R_Car, m_matrix);
 
@@ -162,67 +183,49 @@ public:
 
     for (int i = 0; i < _line1.size(); i++) {
       T uv[2] = { (T)_line1[i].x, (T)_line1[i].y };
-      T a = m_Matrix(1, 0) - m_Matrix(2, 0) * uv[1];
-      T b = m_Matrix(1, 2) - m_Matrix(2, 2) * uv[1];
-      T c = m_Matrix(2, 1) * uv[1] - m_Matrix(1, 1) * aim[3];
+      T p3d[3];
 
-      T m = m_Matrix(0, 0) - m_Matrix(2, 0) * uv[0];
-      T n = m_Matrix(0, 2) - m_Matrix(2, 2) * uv[0];
-      T p = m_Matrix(2, 1) * uv[0] - m_Matrix(0, 1) * aim[3];
-
-      T c_a = c / a, b_a = b / a;
-
-      line1[i][1] = (c_a - (p / m)) / (b_a - (n / m));
-      line1[i][0] = c_a - b_a * line1[i][1];
+      GetPoint3d(m_matrix, uv, aim[3], p3d);
+      line1[i][1] = p3d[1];
+      line1[i][0] = p3d[0];
       average[0] += line1[i][0];
-      //LOG(ERROR) << line1[i][1];
     }
 
     for (int i = 0; i < _line2.size(); i++) {
       T uv[2] = { (T)_line2[i].x, (T)_line2[i].y };
-      T a = m_Matrix(1, 0) - m_Matrix(2, 0) * uv[1];
-      T b = m_Matrix(1, 2) - m_Matrix(2, 2) * uv[1];
-      T c = m_Matrix(2, 1) * uv[1] - m_Matrix(1, 1) * aim[3];
-
-      T m = m_Matrix(0, 0) - m_Matrix(2, 0) * uv[0];
-      T n = m_Matrix(0, 2) - m_Matrix(2, 2) * uv[0];
-      T p = m_Matrix(2, 1) * uv[0] - m_Matrix(0, 1) * aim[3];
-
-      T c_a = c / a, b_a = b / a;
-
-      line2[i][1] = (c_a - (p / m)) / (b_a - (n / m)); //z
-      line2[i][0] = c_a - b_a * line2[i][1]; //x
+      T p3d[3];
+      GetPoint3d(m_matrix, uv, aim[3], p3d);
+      line2[i][1] = p3d[1];
+      line2[i][0] = p3d[0];
       average[1] += line2[i][0];
-      //LOG(ERROR) << line2[i][1];
     }
 
-    residuals[0] = (T)0;
-
+    T max = (T)0, min = (T)100;
+    int l1, l2;
     for (int i = 0; i < line1.size(); i++) {
       for (int j = 0; j < line2.size(); j++) {
         T dist = (line1[i][0] - line2[j][0]);
         //LOG(ERROR) << dist;
         if (dist < (T)0) {
-          dist = dist + (T)_distance;
-        } else {
-          dist = (T)_distance - dist;
-        }
-        if (dist < (T)0) {
           dist = -dist;
         }
-        //LOG(ERROR) << dist;
-        residuals[0] += (dist * dist);
+        if (max < dist) {
+          max = dist;
+          l1 = i;
+          l2 = j;
+        }
+        if (min > dist) {
+          min = dist;
+        }
       }
     }
-    residuals[0] /= (T)(line1.size() * line2.size());
-
-    T dist = average[0] - average[1];
-    residuals[1] = dist * dist;
-
-    LOG(ERROR) << residuals[0] << "\n" << residuals[1];
+    max = max - (T)_distance;
+    min = min - (T)_distance;
+    residuals[0] = max * max + min * min;
     return true;
   };
 };
+int ZLineDistance::seq = 0;
 
 void Ax_B(double a, double b, double c,
   double m, double n, double p) {
@@ -230,7 +233,6 @@ void Ax_B(double a, double b, double c,
   double y = (c / a - (p / m)) / (b / a - (n / m));
   LOG(ERROR) << "res = " << x << "," << y;
 }
-
 
 int main() {
   std::string points_file("D:\\Projects\\BoardDetect\\resources\\extrinsic_use/points2.yaml");
@@ -267,9 +269,11 @@ int main() {
       if (l.y < r.y || (l.y == r.y && l.x < r.x)) return true;
       else return false;
     });
-
+    undistort_points[i] = points[i];
+#if 0
     cv::undistortPoints(points[i], undistort_points[i], camera_ptr->Intrinsic(), \
       camera_ptr->Distortion(), cv::noArray(), camera_ptr->Intrinsic());
+#endif
   }
   double res[4] = { -0.0151731, -0.0314901, -0.0323597,1.54488 };
   ceres::Problem problem;
@@ -287,7 +291,7 @@ int main() {
   problem.AddResidualBlock(cost_func, nullptr, res);
 
   /////////
-  const double lane_interval = 3.7;
+  const double lane_interval = 3.5;
   cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[0], undistort_points[1]);
   problem.AddResidualBlock(cost_func, nullptr, res);
 
@@ -300,8 +304,9 @@ int main() {
   LOG(ERROR) << "resudual number = " << problem.NumResidualBlocks() << "," << problem.NumResiduals() << std::endl;
 
   ceres::Solver::Options options;
-  options.linear_solver_type = ceres::DENSE_QR;
+  options.linear_solver_type = ceres::DENSE_SCHUR;
   options.minimizer_progress_to_stdout = true;
+  options.max_num_iterations = 100000;
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
   LOG(ERROR) << "FindRotation:" << summary.BriefReport();
@@ -310,8 +315,27 @@ int main() {
   cv::Matx33d R;
   cv::Rodrigues(r, R);
   LOG(ERROR) << "rotation = \n" << R;
+  LOG(ERROR) << "car_R_cam = \n" << R.inv();
 
-  cv::Matx33d m_Matrix = camera_ptr->Intrinsic() * R;
+  cv::Matx33d m_Matrix_ceres = camera_ptr->Intrinsic() * R;
+
+  LOG(ERROR) << "aim[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "]";
+  LOG(ERROR) << "Cam_R_Car = \n" << toString(R.val);
+  LOG(ERROR) << "m matrix = \n" << toString(m_Matrix_ceres.val);
+
+  for (int i = 0; i < 4; i++) {
+    std::stringstream ss;
+    ss << "line [" << i << "]\n";
+    for (int j = 0; j < undistort_points[i].size(); j++) {
+      double uv[2] = { undistort_points[i][j].x, undistort_points[i][j].y };
+      double p3d[3];
+      GetPoint3d(m_Matrix_ceres.val, uv, res[3], p3d);
+      ss << "[" << j << "]" << p3d[0] << "," << p3d[1] << "]\n";
+    }
+    LOG(ERROR) << ss.str();
+  }
+
+#if 0
   std::vector<std::array<double, 2>> p3ds[4];
   std::array<double, 2> average[4] = { {0} };
   for (int i = 0; i < 4; i++) {
@@ -365,7 +389,11 @@ int main() {
     for (auto &p : undistort_points[i]) {
       cv::Matx31d pm =
         get_point3d(m_Matrix, p, 1.5);
-      ss << pm.t() << std::endl;
+      ss << pm.t();
+      double ppp[2] = { p.x, p.y };
+      GetPoint3d(m_Matrix.val, ppp, 1.5, pm.val);
+      ss << " new " << pm.t() << std::endl;
+
       p3ds[i].emplace_back(std::array<double, 2>({ pm(0), pm(1) }));
       aaverage[i][0] += pm(0);
       aaverage[i][1] += pm(1);
@@ -379,6 +407,31 @@ int main() {
     LOG(ERROR) << std::endl << ss.str() << "\ndev = " << dev[0];
   }
   LOG(ERROR) << "dist = " << GetCost(p3ds[0], p3ds[1]) << "," << GetCost(p3ds[2], p3ds[1]) << "," << GetCost(p3ds[2], p3ds[3]);
+#endif
+  ZLine lines[4] = {
+    ZLine(camera_ptr->Intrinsic(), undistort_points[0]),
+    ZLine(camera_ptr->Intrinsic(), undistort_points[1]),
+    ZLine(camera_ptr->Intrinsic(), undistort_points[2]),
+    ZLine(camera_ptr->Intrinsic(), undistort_points[3])
+  };
+  ZLineDistance zdist[3] = {
+    ZLineDistance(camera_ptr->Intrinsic(), lane_interval, undistort_points[0], undistort_points[1]),
+    ZLineDistance(camera_ptr->Intrinsic(), lane_interval, undistort_points[1], undistort_points[2]),
+    ZLineDistance(camera_ptr->Intrinsic(), lane_interval, undistort_points[2], undistort_points[3])
+  };
+  double residuals[2] = {0};
+  double aim[4] = { -0.0151731, -0.0314901, -0.0323597,1.54488 };
+  for (int i = 0; i < 4; i++) {
+    lines[i](res, residuals);
+    //lines[i](aim, residuals+1);
+    LOG(ERROR) << "zline resudual[" << i << "] = " << residuals[0] << "-" << residuals[1];
+  }
+
+  for (int i = 0; i < 3; i++) {
+    zdist[i](res, residuals);
+    zdist[i](aim, residuals + 1);
+    LOG(ERROR) << "ZLineDistance resudual[" << i << "] = " << residuals[0] << "-" << residuals[1];
+  }
 
 #if 0
   double left[9] = { 1, 2.3, 1, 3, 12, 3.4, 3, 1, 0.4 };
