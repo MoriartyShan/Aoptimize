@@ -235,17 +235,16 @@ void Ax_B(double a, double b, double c,
 }
 
 int main() {
-  std::string points_file("D:\\Projects\\BoardDetect\\resources\\extrinsic_use/points2.yaml");
+  std::string points_file("D:\\Projects\\BoardDetect\\Extrinsic\\res\\extrinsic_use\\points2.yaml");
   std::string camera_file("D:\\Projects\\BoardDetect\\resources\\hardwares\\C.yaml");
-  std::string image_file("D:\\Projects\\Documents\\20200507\\find_lane\\2005071058421104.jpg");
   auto camera_ptr = Camera::create(camera_file);
 #if 0
+  std::string image_file("D:\\Projects\\BoardDetect\\Extrinsic\\images\\2005141404210153.png");
   cv::Mat img = cv::imread(image_file, cv::IMREAD_UNCHANGED), imgo;
 
   LOG(ERROR) << "cameraK = " << camera_ptr->Intrinsic() << " dist = " << camera_ptr->Distortion();
-
-  cv::undistort(img, imgo, camera_ptr->Intrinsic(), camera_ptr->Distortion());
-  cv::imwrite("undistort.jpg", imgo);
+  imgo = camera_ptr->UndistortImage(img);
+  cv::imwrite("D:\\Projects\\BoardDetect\\Extrinsic\\images\\draw_line_2005141404210153.png", imgo);
   return 0;
 #endif
   std::vector<cv::Point2d> points[4], undistort_points[4];
@@ -291,7 +290,7 @@ int main() {
   problem.AddResidualBlock(cost_func, nullptr, res);
 
   /////////
-  const double lane_interval = 3.5;
+  const double lane_interval = 3.6;
   cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[0], undistort_points[1]);
   problem.AddResidualBlock(cost_func, nullptr, res);
 
