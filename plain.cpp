@@ -235,7 +235,7 @@ void Ax_B(double a, double b, double c,
 }
 
 int main() {
-  std::string points_file("D:\\Projects\\BoardDetect\\Extrinsic\\res\\extrinsic_use\\points2.yaml");
+  std::string points_file("D:\\Projects\\BoardDetect\\Extrinsic\\res\\extrinsic_use\\points.yaml");
   std::string camera_file("D:\\Projects\\BoardDetect\\resources\\hardwares\\C.yaml");
   auto camera_ptr = Camera::create(camera_file);
 #if 0
@@ -274,7 +274,7 @@ int main() {
       camera_ptr->Distortion(), cv::noArray(), camera_ptr->Intrinsic());
 #endif
   }
-  double res[4] = { -0.0151731, -0.0314901, -0.0323597,1.54488 };
+  double res[4] = { -0.2867219302074713, -0.06513062417445484, 0.08812881338902011 , 1.4 };
   ceres::Problem problem;
 
   auto cost_func = ZLine::Create(camera_ptr->Intrinsic(), undistort_points[0]);

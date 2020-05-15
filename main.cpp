@@ -10,9 +10,9 @@
 #include <Eigen/Core>
 #include <opencv2/opencv.hpp>
 
-#define XP 2
+#define XP 3
 #define YP 1
-#define ZP 1
+#define ZP 2
 
 class Zerror {
 private:
@@ -166,7 +166,7 @@ int main() {
   std::vector<cv::Point3d> points;
   
   std::vector<std::vector<int>> places[3];
-  std::string points_file("D:\\Projects\\Documents\\20200507/points.yaml");
+  std::string points_file("D:\\Projects\\BoardDetect\\Extrinsic\\res\\extrinsic_use\\points.yaml");
   {
     cv::FileStorage config(points_file, cv::FileStorage::READ);
     CHECK(config.isOpened());
@@ -194,10 +194,13 @@ int main() {
   ceres::Solve(options, &problem, &summary);
   LOG(ERROR) << "FindRotation:" << summary.BriefReport();
   LOG(ERROR) << "vector = " << r_vec[0] << "," << r_vec[1] << "," << r_vec[2];
-  cv::Vec3d r(r_vec[0], r_vec[1], r_vec[2]);
-  cv::Matx33d R;
+  cv::Vec3d r(r_vec[0], r_vec[1], r_vec[2]), rinv;
+  cv::Matx33d R, Rinv;
   cv::Rodrigues(r, R);
   LOG(ERROR) << "Get R:\n" << R;
+  Rinv = R.inv();
+  cv::Rodrigues(Rinv, rinv);
+  LOG(ERROR) << "Get Rinv:\n" << Rinv << "\n" << rinv.t();
 
   double y_norm = 0;
   for (int i = 0; i < points.size(); i++) {
