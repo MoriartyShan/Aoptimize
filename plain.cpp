@@ -248,8 +248,8 @@ int main() {
   return 0;
 #endif
   std::vector<cv::Point2d> points[4], undistort_points[4];
-  
-  {
+  if (false) {
+    //get points by hand
     cv::FileStorage config(points_file, cv::FileStorage::READ);
     CHECK(config.isOpened());
     cv::read(config["first"], points[0]);
@@ -261,6 +261,40 @@ int main() {
     LOG(ERROR) << "second = " << points[1].size();
     LOG(ERROR) << "third = " << points[2].size();
     LOG(ERROR) << "fourth = " << points[03].size();
+  } else {
+    //calculate points
+    const int total_number = 20;
+    points[0].resize(total_number);
+    points[1].resize(total_number);
+    points[2].resize(total_number);
+    points[3].resize(total_number);
+
+    points[0][0] = cv::Point2d(671, 863);
+    points[0][total_number - 1] = cv::Point2d(32, 1005);
+
+    points[1][0] = cv::Point2d(502, 1036);
+    points[1][total_number - 1] = cv::Point2d(817, 835);
+
+    points[2][0] = cv::Point2d(1085, 1076);
+    points[2][total_number - 1] = cv::Point2d(855, 853);
+
+    points[3][0] = cv::Point2d(1673, 1075);
+    points[3][total_number - 1] = cv::Point2d(1029, 887);
+  
+    auto FillPoints = [&points](const int id) {
+      auto &line = points[id];
+      const int size = line.size() - 1;
+      cv::Point2d step = (line[size] - line[0]) / (size);
+      LOG(ERROR) << "step = " << step;
+      for (int i = 1; i < size; i++) {
+        line[i] = line[i - 1] + step;
+      }
+    };
+
+    for (int i = 0; i < 4; i++) {
+      FillPoints(i);
+    }
+
   }
 
   for (int i = 0; i < 4; i++) {
