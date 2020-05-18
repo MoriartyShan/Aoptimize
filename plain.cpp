@@ -3,6 +3,7 @@
 #include <ceres/ceres.h>
 #include <opencv2/opencv.hpp>
 #include "../Common/camera.h"
+#include "../Common/utils.h"
 
 std::string toString(double *matrix) {
   std::stringstream matrix_string;
@@ -16,44 +17,25 @@ std::string toString(double *matrix) {
   return matrix_string.str();
 }
 
-template<typename T>
-void GetPoint3d(const T* m_matrix, const T* uv, const T h, T* p3d) {
-
-#define IDX(r, c) ((r) * 3 + (c))
-  T a = m_matrix[IDX(1, 0)] - m_matrix[IDX(2, 0)] * uv[1];
-  T b = m_matrix[IDX(1, 2)] - m_matrix[IDX(2, 2)] * uv[1];
-  T c = m_matrix[IDX(2, 1)] * uv[1] - m_matrix[IDX(1, 1)] * h;
-  T m = m_matrix[IDX(0, 0)] - m_matrix[IDX(2, 0)] * uv[0];
-  T n = m_matrix[IDX(0, 2)] - m_matrix[IDX(2, 2)] * uv[0];
-  T p = m_matrix[IDX(2, 1)] * uv[0] - m_matrix[IDX(0, 1)] * h;
-
-  //MLOG() << "[a, b, c, m, n, p] = [" << a << "," << b << "," << c << "," << m << "," << n << "," << p << "]";
-
-  p3d[1] = (c / a - (p / m)) / (b / a - (n / m));
-  p3d[0] = (c / b - p / n) / (a / b - m / n);
-  p3d[2] = m_matrix[IDX(2, 0)] * p3d[0] + m_matrix[IDX(2, 2)] * p3d[1] + m_matrix[IDX(2, 1)] * h;
-#undef IDX
-}
-
-cv::Matx31d get_point3d(const cv::Matx33d &m_Matrix, const cv::Point2d& p2d, const double height) {
-  using T = double;
-  T uv[2] = { (T)p2d.x, (T)p2d.y };
-  T a = m_Matrix(1, 0) - m_Matrix(2, 0) * uv[1];
-  T b = m_Matrix(1, 2) - m_Matrix(2, 2) * uv[1];
-  T c = m_Matrix(2, 1) * uv[1] - m_Matrix(1, 1) * height;
-
-  T m = m_Matrix(0, 0) - m_Matrix(2, 0) * uv[0];
-  T n = m_Matrix(0, 2) - m_Matrix(2, 2) * uv[0];
-  T p = m_Matrix(2, 1) * uv[0] - m_Matrix(0, 1) * height;
-
-  //MLOG() << "[a, b, c, m, n, p] = [" << a << "," << b << "," << c << "," << m << "," << n << "," << p << "]";
-
-  T z = (c / a - (p / m)) / (b / a - (n / m));
-  T x = (c / b - p / n) / (a / b - m / n);
-  T depth = m_Matrix(2, 0) * x + m_Matrix(2, 2) * z + m_Matrix(2, 1) * height;
-
-  return cv::Matx31d(x, z, depth);
-}
+//cv::Matx31d get_point3d(const cv::Matx33d &m_Matrix, const cv::Point2d& p2d, const double height) {
+//  using T = double;
+//  T uv[2] = { (T)p2d.x, (T)p2d.y };
+//  T a = m_Matrix(1, 0) - m_Matrix(2, 0) * uv[1];
+//  T b = m_Matrix(1, 2) - m_Matrix(2, 2) * uv[1];
+//  T c = m_Matrix(2, 1) * uv[1] - m_Matrix(1, 1) * height;
+//
+//  T m = m_Matrix(0, 0) - m_Matrix(2, 0) * uv[0];
+//  T n = m_Matrix(0, 2) - m_Matrix(2, 2) * uv[0];
+//  T p = m_Matrix(2, 1) * uv[0] - m_Matrix(0, 1) * height;
+//
+//  //MLOG() << "[a, b, c, m, n, p] = [" << a << "," << b << "," << c << "," << m << "," << n << "," << p << "]";
+//
+//  T z = (c / a - (p / m)) / (b / a - (n / m));
+//  T x = (c / b - p / n) / (a / b - m / n);
+//  T depth = m_Matrix(2, 0) * x + m_Matrix(2, 2) * z + m_Matrix(2, 1) * height;
+//
+//  return cv::Matx31d(x, z, depth);
+//}
 
 //only for 3x3
 template<typename T>
@@ -126,7 +108,7 @@ public:
     for (int i = 0; i < points.size(); i++) {
       T uv[2] = {(T)points[i].x, (T)points[i].y};
       T p3d[3];
-      GetPoint3d(m_matrix, uv, aim[3], p3d);
+      Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
       psz[i][1] = p3d[1];
       psz[i][0] = p3d[0];
       average[0] += psz[i][0];
@@ -185,7 +167,7 @@ public:
       T uv[2] = { (T)_line1[i].x, (T)_line1[i].y };
       T p3d[3];
 
-      GetPoint3d(m_matrix, uv, aim[3], p3d);
+      Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
       line1[i][1] = p3d[1];
       line1[i][0] = p3d[0];
       average[0] += line1[i][0];
@@ -194,7 +176,7 @@ public:
     for (int i = 0; i < _line2.size(); i++) {
       T uv[2] = { (T)_line2[i].x, (T)_line2[i].y };
       T p3d[3];
-      GetPoint3d(m_matrix, uv, aim[3], p3d);
+      Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
       line2[i][1] = p3d[1];
       line2[i][0] = p3d[0];
       average[1] += line2[i][0];
@@ -238,6 +220,18 @@ int main() {
   std::string points_file("D:\\Projects\\BoardDetect\\Extrinsic\\res\\extrinsic_use\\points.yaml");
   std::string camera_file("D:\\Projects\\BoardDetect\\resources\\hardwares\\C.yaml");
   auto camera_ptr = Camera::create(camera_file);
+
+  //const int dim = 3;
+  //double A[dim * dim] = { 1, 1, -1, -1.5, 2.442, -112.3, 34, 1, 3 }, B[dim] = {1, 3, 2.33211}, x[dim];
+  //cv::Mat_<double> left(dim, dim, A), right(dim, 1, B), result(dim, 1, x);
+  //Solve3x1<double>(A, B, x);
+  //LOG(ERROR) << left << "x\n" << right << "=\n" << result.t();
+  //
+  //cv::solve(left, right, result);
+  //LOG(ERROR) << left << "x\n" << right << "=\n" << result.t();
+
+  //KEEP_CMD_WINDOW();
+
 #if 0
   std::string image_file("D:\\Projects\\BoardDetect\\Extrinsic\\images\\2005141404210153.png");
   cv::Mat img = cv::imread(image_file, cv::IMREAD_UNCHANGED), imgo;
@@ -269,17 +263,17 @@ int main() {
     points[2].resize(total_number);
     points[3].resize(total_number);
 
-    points[0][0] = cv::Point2d(671, 863);
-    points[0][total_number - 1] = cv::Point2d(32, 1005);
+    points[0][0] = cv::Point2d(40, 1001);
+    points[0][total_number - 1] = cv::Point2d(692, 858);
 
-    points[1][0] = cv::Point2d(502, 1036);
-    points[1][total_number - 1] = cv::Point2d(817, 835);
+    points[1][0] = cv::Point2d(438, 1076);
+    points[1][total_number - 1] = cv::Point2d(773, 863);
 
-    points[2][0] = cv::Point2d(1085, 1076);
-    points[2][total_number - 1] = cv::Point2d(855, 853);
+    points[2][0] = cv::Point2d(1091, 1075);
+    points[2][total_number - 1] = cv::Point2d(876, 874);
 
-    points[3][0] = cv::Point2d(1673, 1075);
-    points[3][total_number - 1] = cv::Point2d(1029, 887);
+    points[3][0] = cv::Point2d(1688, 1075);
+    points[3][total_number - 1] = cv::Point2d(1150, 921);
   
     auto FillPoints = [&points](const int id) {
       auto &line = points[id];
@@ -362,7 +356,7 @@ int main() {
     for (int j = 0; j < undistort_points[i].size(); j++) {
       double uv[2] = { undistort_points[i][j].x, undistort_points[i][j].y };
       double p3d[3];
-      GetPoint3d(m_Matrix_ceres.val, uv, res[3], p3d);
+      Camera::GetPoint3d(m_Matrix_ceres.val, uv, res[3], p3d);
       ss << "[" << j << "]" << p3d[0] << "," << p3d[1] << "]\n";
     }
     LOG(ERROR) << ss.str();
@@ -424,7 +418,7 @@ int main() {
         get_point3d(m_Matrix, p, 1.5);
       ss << pm.t();
       double ppp[2] = { p.x, p.y };
-      GetPoint3d(m_Matrix.val, ppp, 1.5, pm.val);
+      Camera::GetPoint3d(m_Matrix.val, ppp, 1.5, pm.val);
       ss << " new " << pm.t() << std::endl;
 
       p3ds[i].emplace_back(std::array<double, 2>({ pm(0), pm(1) }));
