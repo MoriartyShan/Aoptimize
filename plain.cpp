@@ -2,8 +2,13 @@
 #include <ceres/cost_function.h>
 #include <ceres/ceres.h>
 #include <opencv2/opencv.hpp>
+#include <gflags/gflags.h>
+#include <fstream>
 #include "../Common/camera.h"
 #include "../Common/utils.h"
+
+DEFINE_int32(rand_seed, -1, "> 1 as seed, 1 is special,"
+  " <= 0 for random");
 
 std::string toString(double *matrix) {
   std::stringstream matrix_string;
@@ -200,80 +205,51 @@ void Ax_B(double a, double b, double c,
 int main() {
   std::string points_file("D:\\Projects\\BoardDetect\\Extrinsic\\res\\extrinsic_use\\points.yaml");
   std::string camera_file("D:\\Projects\\BoardDetect\\resources\\hardwares\\D.yaml");
+
+  unsigned int rand_seed = FLAGS_rand_seed;
+  if (FLAGS_rand_seed <= 0) {
+    rand_seed = time(0);
+  }
+  srand(rand_seed);
+
   auto camera_ptr = Camera::create(camera_file);
 
-  //const int dim = 3;
-  //double A[dim * dim] = { 1, 1, -1, -1.5, 2.442, -112.3, 34, 1, 3 }, B[dim] = {1, 3, 2.33211}, x[dim];
-  //cv::Mat_<double> left(dim, dim, A), right(dim, 1, B), result(dim, 1, x);
-  //Solve3x1<double>(A, B, x);
-  //LOG(ERROR) << left << "x\n" << right << "=\n" << result.t();
-  //
-  //cv::solve(left, right, result);
-  //LOG(ERROR) << left << "x\n" << right << "=\n" << result.t();
-
-  //KEEP_CMD_WINDOW();
-
-#if 0
-  std::string image_file("D:\\Projects\\BoardDetect\\Extrinsic\\images\\2005141404210153.png");
-  cv::Mat img = cv::imread(image_file, cv::IMREAD_UNCHANGED), imgo;
-
-  LOG(ERROR) << "cameraK = " << camera_ptr->Intrinsic() << " dist = " << camera_ptr->Distortion();
-  imgo = camera_ptr->UndistortImage(img);
-  cv::imwrite("D:\\Projects\\BoardDetect\\Extrinsic\\images\\draw_line_2005141404210153.png", imgo);
-  return 0;
-#endif
   std::vector<cv::Point2d> points[4], undistort_points[4];
-  if (false) {
-    //get points by hand
-    cv::FileStorage config(points_file, cv::FileStorage::READ);
-    CHECK(config.isOpened());
-    cv::read(config["first"], points[0]);
-    cv::read(config["second"], points[1]);
-    cv::read(config["third"], points[2]);
-    cv::read(config["fourth"], points[3]);
 
-    LOG(ERROR) << "first = " << points[0].size();
-    LOG(ERROR) << "second = " << points[1].size();
-    LOG(ERROR) << "third = " << points[2].size();
-    LOG(ERROR) << "fourth = " << points[03].size();
-  } else {
-    //calculate points
-    const int total_number = 20;
-    points[0].resize(total_number);
-    points[1].resize(total_number);
-    points[2].resize(total_number);
-    points[3].resize(total_number);
+  //calculate points
+  const int total_number = 20;
+  points[0].resize(total_number);
+  points[1].resize(total_number);
+  points[2].resize(total_number);
+  points[3].resize(total_number);
 
-    points[0][0] = cv::Point2d(84, 1000);
-    points[0][total_number - 1] = cv::Point2d(997, 729);
+  points[0][0] = cv::Point2d(84, 1000);
+  points[0][total_number - 1] = cv::Point2d(997, 729);
 
-    points[1][0] = cv::Point2d(742, 970);
-    points[1][total_number - 1] = cv::Point2d(1036,733);
+  points[1][0] = cv::Point2d(742, 970);
+  points[1][total_number - 1] = cv::Point2d(1036,733);
 
-    points[2][0] = cv::Point2d(1476, 976);
-    points[2][total_number - 1] = cv::Point2d(1100, 730);
+  points[2][0] = cv::Point2d(1476, 976);
+  points[2][total_number - 1] = cv::Point2d(1100, 730);
 
-    points[3][0] = cv::Point2d(1872, 852);
-    points[3][total_number - 1] = cv::Point2d(1139, 722);
+  points[3][0] = cv::Point2d(1872, 852);
+  points[3][total_number - 1] = cv::Point2d(1139, 722);
 
-    auto FillPoints = [&points](const int id) {
-      auto &line = points[id];
-      const int size = line.size() - 1;
-      cv::Point2d step = (line[size] - line[0]) / (size);
-      LOG(ERROR) << "step = " << step;
-      for (int i = 1; i < size; i++) {
-        line[i] = line[i - 1] + step;
-      }
-    };
-    cv::Mat img = cv::imread("D:\\Projects\\Documents\\20200518_D\\undistort/undist_2005181158164399.png", cv::IMREAD_UNCHANGED);
-    for (int i = 0; i < 4; i++) {
-      FillPoints(i);
-
-      cv::line(img, points[i][0], points[i][total_number - 1], CV_RGB(255, 0, 0));
+  auto FillPoints = [&points](const int id) {
+    auto &line = points[id];
+    const int size = line.size() - 1;
+    cv::Point2d step = (line[size] - line[0]) / (size);
+    LOG(ERROR) << "step = " << step;
+    for (int i = 1; i < size; i++) {
+      line[i] = line[i - 1] + step;
     }
-    cv::imwrite("D:\\Projects\\Documents\\20200518_D\\undistort/undist_undist_2005181158164399.png", img);
-
+  };
+  //cv::Mat img = cv::imread("D:\\Projects\\Documents\\20200518_D\\undistort/undist_2005181158164399.png", cv::IMREAD_UNCHANGED);
+  for (int i = 0; i < 4; i++) {
+    FillPoints(i);
+    //cv::line(img, points[i][0], points[i][total_number - 1], CV_RGB(255, 0, 0));
   }
+  //cv::imwrite("D:\\Projects\\Documents\\20200518_D\\undistort/undist_undist_2005181158164399.png", img);
 
   for (int i = 0; i < 4; i++) {
     std::sort(points[i].begin(), points[i].end(), [](const cv::Point2d &l, const cv::Point2d &r) {
@@ -286,62 +262,68 @@ int main() {
       camera_ptr->Distortion(), cv::noArray(), camera_ptr->Intrinsic());
 #endif
   }
-  const double lane_interval = 3.6;
-  double min_cost = std::numeric_limits<double>::max();
-  double res[4] = { -0.134954,0.0549178,-0.0583392, 1.21 };
+  const double lane_interval = 3.6, stop_cost = 0.001;
+  double min_cost = std::numeric_limits<double>::max(), stop_iter_num = 1000;
+  std::vector<double> best(4);
 
-  ceres::Problem problem;
+#define RAND_A_DOUBLE(a) \
+  ((((rand() & 0xFFFF) / ((double)0xFFFF)) - 0.5) * 2 * (a))
 
-  auto cost_func = ZLine::Create(camera_ptr->Intrinsic(), undistort_points[0]);
-  problem.AddResidualBlock(cost_func, nullptr, res);
+  std::ofstream start_r("./start.csv");
+  while (min_cost > stop_cost && stop_iter_num-- >= 0) {
+    std::vector<double> res = { RAND_A_DOUBLE(0.1),RAND_A_DOUBLE(0.1),RAND_A_DOUBLE(0.1), 1.5 };
 
-  cost_func = ZLine::Create(camera_ptr->Intrinsic(), undistort_points[1]);
-  problem.AddResidualBlock(cost_func, nullptr, res);
+    start_r << stop_iter_num << "," << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << std::endl;
+    ceres::Problem problem;
 
-  cost_func = ZLine::Create(camera_ptr->Intrinsic(), undistort_points[2]);
-  problem.AddResidualBlock(cost_func, nullptr, res);
+    auto cost_func = ZLine::Create(camera_ptr->Intrinsic(), undistort_points[0]);
+    problem.AddResidualBlock(cost_func, nullptr, res.data());
 
-  cost_func = ZLine::Create(camera_ptr->Intrinsic(), undistort_points[3]);
-  problem.AddResidualBlock(cost_func, nullptr, res);
+    cost_func = ZLine::Create(camera_ptr->Intrinsic(), undistort_points[1]);
+    problem.AddResidualBlock(cost_func, nullptr, res.data());
 
-  /////////
+    cost_func = ZLine::Create(camera_ptr->Intrinsic(), undistort_points[2]);
+    problem.AddResidualBlock(cost_func, nullptr, res.data());
 
-  cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[0], undistort_points[1]);
-  problem.AddResidualBlock(cost_func, nullptr, res);
+    cost_func = ZLine::Create(camera_ptr->Intrinsic(), undistort_points[3]);
+    problem.AddResidualBlock(cost_func, nullptr, res.data());
 
-  cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[1], undistort_points[2]);
-  problem.AddResidualBlock(cost_func, nullptr, res);
+    /////////
+    cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[0], undistort_points[1]);
+    problem.AddResidualBlock(cost_func, nullptr, res.data());
 
-  cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[2], undistort_points[3]);
-  problem.AddResidualBlock(cost_func, nullptr, res);
+    cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[1], undistort_points[2]);
+    problem.AddResidualBlock(cost_func, nullptr, res.data());
 
-  //LOG(ERROR) << "resudual number = " << problem.NumResidualBlocks() << "," << problem.NumResiduals() << std::endl;
+    cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[2], undistort_points[3]);
+    problem.AddResidualBlock(cost_func, nullptr, res.data());
 
-  ceres::Solver::Options options;
-  options.linear_solver_type = ceres::DENSE_SCHUR;
-  options.minimizer_progress_to_stdout = true;
-  options.max_num_iterations = 100000;
-  ceres::Solver::Summary summary;
-  ceres::Solve(options, &problem, &summary);
-  LOG(ERROR) << "FindRotation:" << summary.BriefReport();
-  LOG(ERROR) << "vector = " << res[0] << "," << res[1] << "," << res[2] << "," << res[3];
-  if (summary.final_cost < min_cost) {
-    min_cost = summary.final_cost;
-    LOG(WARNING) << "min cost = " << min_cost;
+    //LOG(ERROR) << "resudual number = " << problem.NumResidualBlocks() << "," << problem.NumResiduals() << std::endl;
+
+    ceres::Solver::Options options;
+    options.linear_solver_type = ceres::DENSE_SCHUR;
+    options.minimizer_progress_to_stdout = true;
+    options.max_num_iterations = 100000;
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, &problem, &summary);
+    //LOG(ERROR) << "FindRotation:" << summary.BriefReport();
+    //LOG(ERROR) << "vector = " << res[0] << "," << res[1] << "," << res[2] << "," << res[3];
+    if (summary.final_cost < min_cost) {
+      min_cost = summary.final_cost;
+      best = res;
+      //LOG(WARNING) << "min cost = " << min_cost;
+    }
+
   }
-
-
-
-
-  cv::Vec3d r(res[0], res[1], res[2]);
+  start_r.close();
+  cv::Vec3d r(best[0], best[1], best[2]);
   cv::Matx33d R;
   cv::Rodrigues(r, R);
+  LOG(ERROR) << "best result = [" << best[0] << "," << best[1] << "," << best[2] << "," << best[3] << "] " << min_cost << "," << stop_iter_num;
   LOG(ERROR) << "rotation = \n" << R;
   LOG(ERROR) << "car_R_cam = \n" << R.inv();
 
   cv::Matx33d m_Matrix_ceres = camera_ptr->Intrinsic() * R;
-
-  LOG(ERROR) << "aim[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "]";
   LOG(ERROR) << "Cam_R_Car = \n" << toString(R.val);
   LOG(ERROR) << "m matrix = \n" << toString(m_Matrix_ceres.val);
 
@@ -351,85 +333,12 @@ int main() {
     for (int j = 0; j < undistort_points[i].size(); j++) {
       double uv[2] = { undistort_points[i][j].x, undistort_points[i][j].y };
       double p3d[3];
-      Camera::GetPoint3d(m_Matrix_ceres.val, uv, res[3], p3d);
+      Camera::GetPoint3d(m_Matrix_ceres.val, uv, best[3], p3d);
       ss << "[" << j << "]" << p3d[0] << "," << p3d[1] << "," << p3d[2] << "]\n";
     }
     LOG(ERROR) << ss.str();
   }
 
-#if 0
-  std::vector<std::array<double, 2>> p3ds[4];
-  std::array<double, 2> average[4] = { {0} };
-  for (int i = 0; i < 4; i++) {
-    std::stringstream ss;
-    for (auto &p : undistort_points[i]) {
-      cv::Matx31d pm =
-        get_point3d(m_Matrix, p, res[3]);
-      ss << pm.t() << std::endl;
-      p3ds[i].emplace_back(std::array<double, 2>({ pm(0), pm(1) }));
-      average[i][0] += pm(0);
-      average[i][1] += pm(1);
-      //p3ds[i].back() = ;
-    }
-    average[i][0] /= undistort_points[i].size();
-    average[i][1] /= undistort_points[i].size();
-
-    auto dev = GetDeviation(p3ds[i], average[i]);
-
-    LOG(ERROR) << std::endl << ss.str() << "\ndev = " << dev[0];
-  }
-
-  auto GetCost = [&lane_interval](
-      const std::vector<std::array<double, 2>> &a,
-      const std::vector<std::array<double, 2>> &b) {
-    double dist = 0;
-    for (auto &ap : a) {
-      for (auto & bp : b) {
-        double d = ap[0] - bp[0];
-        if (d < 0) {
-          d = -d;
-        }
-        d = d - lane_interval;
-        dist += (d * d);
-      }
-    }
-    dist /= (a.size() * b.size());
-    return dist;
-  };
-
-  LOG(ERROR) << "dist = " << GetCost(p3ds[0], p3ds[1]) << "," << GetCost(p3ds[2], p3ds[1]) << "," << GetCost(p3ds[2], p3ds[3]);
-
-  cv::Vec3d r_vec;
-  cv::Rodrigues(camera_ptr->Car_R_Cam().inv(), r_vec);
-  LOG(ERROR) << "rvec better = " << r_vec;
-  m_Matrix = camera_ptr->Intrinsic() * camera_ptr->Car_R_Cam().inv();
-  p3ds[4];
-  std::array<double, 2> aaverage[4] = { {0} };
-  for (int i = 0; i < 4; i++) {
-    std::stringstream ss;
-    p3ds[i].clear();
-    for (auto &p : undistort_points[i]) {
-      cv::Matx31d pm =
-        get_point3d(m_Matrix, p, 1.5);
-      ss << pm.t();
-      double ppp[2] = { p.x, p.y };
-      Camera::GetPoint3d(m_Matrix.val, ppp, 1.5, pm.val);
-      ss << " new " << pm.t() << std::endl;
-
-      p3ds[i].emplace_back(std::array<double, 2>({ pm(0), pm(1) }));
-      aaverage[i][0] += pm(0);
-      aaverage[i][1] += pm(1);
-      //p3ds[i].back() = ;
-    }
-    aaverage[i][0] /= undistort_points[i].size();
-    aaverage[i][1] /= undistort_points[i].size();
-
-    auto dev = GetDeviation(p3ds[i], aaverage[i]);
-
-    LOG(ERROR) << std::endl << ss.str() << "\ndev = " << dev[0];
-  }
-  LOG(ERROR) << "dist = " << GetCost(p3ds[0], p3ds[1]) << "," << GetCost(p3ds[2], p3ds[1]) << "," << GetCost(p3ds[2], p3ds[3]);
-#endif
   ZLine lines[4] = {
     ZLine(camera_ptr->Intrinsic(), undistort_points[0]),
     ZLine(camera_ptr->Intrinsic(), undistort_points[1]),
@@ -444,47 +353,19 @@ int main() {
   double residuals[2] = {0};
   double aim[4] = { -0.0151731, -0.0314901, -0.0323597,1.54488 };
   for (int i = 0; i < 4; i++) {
-    lines[i](res, residuals);
+    lines[i](best.data(), residuals);
     //lines[i](aim, residuals+1);
     LOG(ERROR) << "zline resudual[" << i << "] = " << residuals[0] << "-" << residuals[1];
   }
 
   for (int i = 0; i < 3; i++) {
-    zdist[i](res, residuals);
+    zdist[i](best.data(), residuals);
     zdist[i](aim, residuals + 1);
     LOG(ERROR) << "ZLineDistance resudual[" << i << "] = " << residuals[0] << "-" << residuals[1];
   }
 
-#if 0
-  double left[9] = { 1, 2.3, 1, 3, 12, 3.4, 3, 1, 0.4 };
-  double right[9] = { 1, 32.3, 1, 23, 1.2, 14, 4.3, 14, 3.4 };
-  double result[9] = { 0 }, res2[9];
 
-  cv::Mat_<double> leftM(3, 3, left);
-  cv::Mat_<double> rightM(3, 3, right);
-  cv::Mat_<double> resultM(3, 3, result);
-  cv::Mat_<double> result2M(3, 3, res2);
-  resultM = leftM * rightM;
-
-  MatrixMulti(left, right, res2);
-
-
-  LOG(ERROR) << "test = \n" << resultM << "\n------------------\n" << result2M;
-  LOG(ERROR) << "diff=\n" << resultM - result2M;
-  LOG(ERROR) << "test " << (uint64_t)result << "  " << (uint64_t)resultM.data;
-  LOG(ERROR) << "test " << (uint64_t)res2 << "  " << (uint64_t)result2M.data;
-
-
-  Ax_B(-40.9238, -221.994, -1263.28, 1044.89, 171.676, -35.3262);
-  cv::Matx22d A(
-    -40.9238, -221.994,
-    1044.89, 171.676
-  );
-  cv::Matx21d B(-1263.28, -35.3262), res;
-  cv::solve(A, B, res);
-  LOG(ERROR) << "res = " << res.t();
-#endif
-  system("pause");
+  KEEP_CMD_WINDOW();
 
   return 0;
 }
