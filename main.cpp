@@ -164,7 +164,7 @@ int main() {
   ceres::Problem problem;
   double r_vec[3] = {1, 0, 0};
   std::vector<cv::Point3d> points;
-  
+
   std::vector<std::vector<int>> places[3];
   std::string points_file("D:\\Projects\\BoardDetect\\Extrinsic\\res\\extrinsic_use\\points.yaml");
   {
@@ -209,7 +209,7 @@ int main() {
     if (i < 6) {
       y_norm += cp.y;
     }
-    
+
   }
   LOG(ERROR) << "y = " << y_norm / 6;
   system("pause");

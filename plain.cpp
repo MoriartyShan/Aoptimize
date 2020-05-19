@@ -52,7 +52,7 @@ void MatrixMulti(const T *left, const T *right, T* result) {
   }
 }
 
-template<typename T> 
+template<typename T>
 std::array<T, 2> GetDeviation(const std::vector<std::array<T, 2>> &vectors, const std::array<T, 2>& ave) {
   std::array<T, 2> res = { (T)0 };
   for (auto &v : vectors) {
@@ -100,7 +100,7 @@ public:
     T Cam_R_Car[9], cameraK[9], m_matrix[9];
     std::array<T, 2> average = { (T)0 };;
     ceres::MatrixAdapter<T, 3, 1> m_Matrix(m_matrix), Cam_R_Car_M(Cam_R_Car);
-   
+
     ceres::AngleAxisToRotationMatrix(aim, Cam_R_Car_M);
     InsertMatrixToPointer(_cameraK, cameraK);
     MatrixMulti(cameraK, Cam_R_Car, m_matrix);
@@ -140,7 +140,7 @@ public:
   }
 
   ZLineDistance(
-      const cv::Matx33d& cameraK, 
+      const cv::Matx33d& cameraK,
       const double distance,
       const std::vector<cv::Point2d>& line1,
       const std::vector<cv::Point2d>& line2) {
@@ -149,7 +149,7 @@ public:
     _line1 = line1;
     _line2 = line2;
   };
-  
+
   template <typename T>
   bool operator()(const T* const aim, T* residuals) const {
     std::vector<std::array<T, 2>> line1(_line1.size());
@@ -250,7 +250,7 @@ int main() {
     cv::read(config["second"], points[1]);
     cv::read(config["third"], points[2]);
     cv::read(config["fourth"], points[3]);
-    
+
     LOG(ERROR) << "first = " << points[0].size();
     LOG(ERROR) << "second = " << points[1].size();
     LOG(ERROR) << "third = " << points[2].size();
@@ -274,7 +274,7 @@ int main() {
 
     points[3][0] = cv::Point2d(1688, 1075);
     points[3][total_number - 1] = cv::Point2d(1150, 921);
-  
+
     auto FillPoints = [&points](const int id) {
       auto &line = points[id];
       const int size = line.size() - 1;
@@ -385,7 +385,7 @@ int main() {
   }
 
   auto GetCost = [&lane_interval](
-      const std::vector<std::array<double, 2>> &a, 
+      const std::vector<std::array<double, 2>> &a,
       const std::vector<std::array<double, 2>> &b) {
     double dist = 0;
     for (auto &ap : a) {
@@ -490,6 +490,6 @@ int main() {
   LOG(ERROR) << "res = " << res.t();
 #endif
   system("pause");
-  
+
   return 0;
 }
