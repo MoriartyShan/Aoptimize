@@ -17,26 +17,6 @@ std::string toString(double *matrix) {
   return matrix_string.str();
 }
 
-//cv::Matx31d get_point3d(const cv::Matx33d &m_Matrix, const cv::Point2d& p2d, const double height) {
-//  using T = double;
-//  T uv[2] = { (T)p2d.x, (T)p2d.y };
-//  T a = m_Matrix(1, 0) - m_Matrix(2, 0) * uv[1];
-//  T b = m_Matrix(1, 2) - m_Matrix(2, 2) * uv[1];
-//  T c = m_Matrix(2, 1) * uv[1] - m_Matrix(1, 1) * height;
-//
-//  T m = m_Matrix(0, 0) - m_Matrix(2, 0) * uv[0];
-//  T n = m_Matrix(0, 2) - m_Matrix(2, 2) * uv[0];
-//  T p = m_Matrix(2, 1) * uv[0] - m_Matrix(0, 1) * height;
-//
-//  //MLOG() << "[a, b, c, m, n, p] = [" << a << "," << b << "," << c << "," << m << "," << n << "," << p << "]";
-//
-//  T z = (c / a - (p / m)) / (b / a - (n / m));
-//  T x = (c / b - p / n) / (a / b - m / n);
-//  T depth = m_Matrix(2, 0) * x + m_Matrix(2, 2) * z + m_Matrix(2, 1) * height;
-//
-//  return cv::Matx31d(x, z, depth);
-//}
-
 //only for 3x3
 template<typename T>
 void MatrixMulti(const T *left, const T *right, T* result) {
@@ -109,7 +89,7 @@ public:
       T uv[2] = {(T)points[i].x, (T)points[i].y};
       T p3d[3];
       Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
-      psz[i][1] = p3d[1];
+      psz[i][1] = p3d[2];
       psz[i][0] = p3d[0];
       average[0] += psz[i][0];
       average[1] += psz[i][1];
@@ -117,7 +97,7 @@ public:
     average[0] /= (T)points.size();
     average[1] /= (T)points.size();
     auto dev = GetDeviation(psz, average);
-    residuals[0] = ceres::sqrt(dev[0]);
+    residuals[0] = ceres::abs(ceres::sqrt(dev[0]) / average[0]);
     return true;
   };
 };
@@ -168,17 +148,18 @@ public:
       T p3d[3];
 
       Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
-      line1[i][1] = p3d[1];
       line1[i][0] = p3d[0];
+      line1[i][1] = p3d[2];
       average[0] += line1[i][0];
     }
 
     for (int i = 0; i < _line2.size(); i++) {
       T uv[2] = { (T)_line2[i].x, (T)_line2[i].y };
       T p3d[3];
-      Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
-      line2[i][1] = p3d[1];
+      Camera::GetPoint3d<T>(m_matrix, uv, aim[3], p3d);
       line2[i][0] = p3d[0];
+      line2[i][1] = p3d[2];
+
       average[1] += line2[i][0];
     }
 
@@ -218,7 +199,7 @@ void Ax_B(double a, double b, double c,
 
 int main() {
   std::string points_file("D:\\Projects\\BoardDetect\\Extrinsic\\res\\extrinsic_use\\points.yaml");
-  std::string camera_file("D:\\Projects\\BoardDetect\\resources\\hardwares\\C.yaml");
+  std::string camera_file("D:\\Projects\\BoardDetect\\resources\\hardwares\\D.yaml");
   auto camera_ptr = Camera::create(camera_file);
 
   //const int dim = 3;
@@ -263,17 +244,17 @@ int main() {
     points[2].resize(total_number);
     points[3].resize(total_number);
 
-    points[0][0] = cv::Point2d(40, 1001);
-    points[0][total_number - 1] = cv::Point2d(692, 858);
+    points[0][0] = cv::Point2d(84, 1000);
+    points[0][total_number - 1] = cv::Point2d(997, 729);
 
-    points[1][0] = cv::Point2d(438, 1076);
-    points[1][total_number - 1] = cv::Point2d(773, 863);
+    points[1][0] = cv::Point2d(742, 970);
+    points[1][total_number - 1] = cv::Point2d(1036,733);
 
-    points[2][0] = cv::Point2d(1091, 1075);
-    points[2][total_number - 1] = cv::Point2d(876, 874);
+    points[2][0] = cv::Point2d(1476, 976);
+    points[2][total_number - 1] = cv::Point2d(1100, 730);
 
-    points[3][0] = cv::Point2d(1688, 1075);
-    points[3][total_number - 1] = cv::Point2d(1150, 921);
+    points[3][0] = cv::Point2d(1872, 852);
+    points[3][total_number - 1] = cv::Point2d(1139, 722);
 
     auto FillPoints = [&points](const int id) {
       auto &line = points[id];
@@ -284,10 +265,13 @@ int main() {
         line[i] = line[i - 1] + step;
       }
     };
-
+    cv::Mat img = cv::imread("D:\\Projects\\Documents\\20200518_D\\undistort/undist_2005181158164399.png", cv::IMREAD_UNCHANGED);
     for (int i = 0; i < 4; i++) {
       FillPoints(i);
+
+      cv::line(img, points[i][0], points[i][total_number - 1], CV_RGB(255, 0, 0));
     }
+    cv::imwrite("D:\\Projects\\Documents\\20200518_D\\undistort/undist_undist_2005181158164399.png", img);
 
   }
 
@@ -302,7 +286,10 @@ int main() {
       camera_ptr->Distortion(), cv::noArray(), camera_ptr->Intrinsic());
 #endif
   }
-  double res[4] = { -0.2867219302074713, -0.06513062417445484, 0.08812881338902011 , 1.4 };
+  const double lane_interval = 3.6;
+  double min_cost = std::numeric_limits<double>::max();
+  double res[4] = { -0.134954,0.0549178,-0.0583392, 1.21 };
+
   ceres::Problem problem;
 
   auto cost_func = ZLine::Create(camera_ptr->Intrinsic(), undistort_points[0]);
@@ -318,7 +305,7 @@ int main() {
   problem.AddResidualBlock(cost_func, nullptr, res);
 
   /////////
-  const double lane_interval = 3.6;
+
   cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[0], undistort_points[1]);
   problem.AddResidualBlock(cost_func, nullptr, res);
 
@@ -328,7 +315,7 @@ int main() {
   cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[2], undistort_points[3]);
   problem.AddResidualBlock(cost_func, nullptr, res);
 
-  LOG(ERROR) << "resudual number = " << problem.NumResidualBlocks() << "," << problem.NumResiduals() << std::endl;
+  //LOG(ERROR) << "resudual number = " << problem.NumResidualBlocks() << "," << problem.NumResiduals() << std::endl;
 
   ceres::Solver::Options options;
   options.linear_solver_type = ceres::DENSE_SCHUR;
@@ -338,6 +325,14 @@ int main() {
   ceres::Solve(options, &problem, &summary);
   LOG(ERROR) << "FindRotation:" << summary.BriefReport();
   LOG(ERROR) << "vector = " << res[0] << "," << res[1] << "," << res[2] << "," << res[3];
+  if (summary.final_cost < min_cost) {
+    min_cost = summary.final_cost;
+    LOG(WARNING) << "min cost = " << min_cost;
+  }
+
+
+
+
   cv::Vec3d r(res[0], res[1], res[2]);
   cv::Matx33d R;
   cv::Rodrigues(r, R);
@@ -357,7 +352,7 @@ int main() {
       double uv[2] = { undistort_points[i][j].x, undistort_points[i][j].y };
       double p3d[3];
       Camera::GetPoint3d(m_Matrix_ceres.val, uv, res[3], p3d);
-      ss << "[" << j << "]" << p3d[0] << "," << p3d[1] << "]\n";
+      ss << "[" << j << "]" << p3d[0] << "," << p3d[1] << "," << p3d[2] << "]\n";
     }
     LOG(ERROR) << ss.str();
   }

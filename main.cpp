@@ -10,9 +10,9 @@
 #include <Eigen/Core>
 #include <opencv2/opencv.hpp>
 
-#define XP 3
+#define XP 14
 #define YP 1
-#define ZP 2
+#define ZP 7
 
 class Zerror {
 private:
