@@ -22,6 +22,17 @@ std::string toString(double *matrix) {
   return matrix_string.str();
 }
 
+//distance^2 of point P to line MN
+template<typename T>
+T GetSquaredDistance(const T *P, const T *M, const T* N) {
+  T MN[2] = { N[0] - M[0], N[1] - M[1] };
+  T MP[2] = { P[0] - M[0], P[1] - M[1] };
+  T cross = MP[0] * MN[1] - MP[1] * MN[0];
+  T mod_MN = MN[0] * MN[0] + MN[1] * MN[1];
+  cross = cross * cross;
+  return cross / mod_MN;
+}
+
 //only for 3x3
 template<typename T>
 void MatrixMulti(const T *left, const T *right, T* result) {
@@ -70,7 +81,7 @@ private:
   cv::Matx33d _cameraK;
 public:
   static ceres::CostFunction* Create(const cv::Matx33d& cameraK, const std::vector<cv::Point2d> &_points) {
-    return (new ceres::AutoDiffCostFunction<ZLine, 1, 4>(
+    return (new ceres::AutoDiffCostFunction<ZLine, 2, 4>(
       new ZLine(cameraK, _points)));
   }
 
@@ -96,13 +107,13 @@ public:
       Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
       psz[i][1] = p3d[2];
       psz[i][0] = p3d[0];
-      average[0] += psz[i][0];
-      average[1] += psz[i][1];
     }
-    average[0] /= (T)points.size();
-    average[1] /= (T)points.size();
-    auto dev = GetDeviation(psz, average);
-    residuals[0] = ceres::abs(ceres::sqrt(dev[0]) / average[0]);
+    
+    T dx = psz[0][0] - psz[1][0];
+    T dz = psz[0][1] - psz[1][1];
+    residuals[0] = (T)100 * dx / dz;
+    residuals[1] = dx;
+    //residuals[1] = aim[0] * aim[0] + aim[1] * aim[1] + aim[2] * aim[2];
     return true;
   };
 };
@@ -120,7 +131,7 @@ public:
       const double distance,
       const std::vector<cv::Point2d>& line1,
       const std::vector<cv::Point2d>& line2) {
-    return (new ceres::AutoDiffCostFunction<ZLineDistance, 1, 4>(
+    return (new ceres::AutoDiffCostFunction<ZLineDistance, 2, 4>(
       new ZLineDistance(cameraK, distance, line1, line2)));
   }
 
@@ -155,7 +166,6 @@ public:
       Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
       line1[i][0] = p3d[0];
       line1[i][1] = p3d[2];
-      average[0] += line1[i][0];
     }
 
     for (int i = 0; i < _line2.size(); i++) {
@@ -164,32 +174,22 @@ public:
       Camera::GetPoint3d<T>(m_matrix, uv, aim[3], p3d);
       line2[i][0] = p3d[0];
       line2[i][1] = p3d[2];
-
-      average[1] += line2[i][0];
     }
 
-    T max = (T)0, min = (T)100;
-    int l1, l2;
-    for (int i = 0; i < line1.size(); i++) {
-      for (int j = 0; j < line2.size(); j++) {
-        T dist = (line1[i][0] - line2[j][0]);
-        //LOG(ERROR) << dist;
-        if (dist < (T)0) {
-          dist = -dist;
-        }
-        if (max < dist) {
-          max = dist;
-          l1 = i;
-          l2 = j;
-        }
-        if (min > dist) {
-          min = dist;
-        }
-      }
+    T vl[2] = { line1[0][0] - line1[1][0],  line1[0][1] - line1[1][1] };
+    T vr[2] = { line2[0][0] - line2[1][0],  line2[0][1] - line2[1][1] };
+    T cross = vl[0] * vr[1] - vl[1] * vr[0];
+    T dot = vl[0] * vr[0] - vl[1] - vr[1];
+    
+    residuals[0] = (T)100 * ceres::abs(cross / dot);
+    residuals[1] = GetSquaredDistance(line1[0].data(), line2[0].data(), line2[1].data());
+    residuals[1] += GetSquaredDistance(line1[1].data(), line2[0].data(), line2[1].data());
+    residuals[1] += GetSquaredDistance(line2[0].data(), line1[0].data(), line1[1].data());
+    residuals[1] += GetSquaredDistance(line2[1].data(), line1[0].data(), line1[1].data());
+    residuals[1] -= ((T)4 * (T)(_distance * _distance));
+    if (residuals[1] < (T)0) {
+      residuals[1] = -residuals[1];
     }
-    max = max - (T)_distance;
-    min = min - (T)_distance;
-    residuals[0] = max * max + min * min;
     return true;
   };
 };
@@ -203,8 +203,7 @@ void Ax_B(double a, double b, double c,
 }
 
 int main() {
-  std::string points_file("D:\\Projects\\BoardDetect\\Extrinsic\\res\\extrinsic_use\\points.yaml");
-  std::string camera_file("D:\\Projects\\BoardDetect\\resources\\hardwares\\D.yaml");
+  std::string camera_file("D:\\Projects\\BoardDetect\\resources\\hardwares\\C.yaml");
 
   unsigned int rand_seed = FLAGS_rand_seed;
   if (FLAGS_rand_seed <= 0) {
@@ -213,27 +212,26 @@ int main() {
   srand(rand_seed);
 
   auto camera_ptr = Camera::create(camera_file);
-
   std::vector<cv::Point2d> points[4], undistort_points[4];
 
   //calculate points
-  const int total_number = 20;
+  const int total_number = 2;
   points[0].resize(total_number);
   points[1].resize(total_number);
   points[2].resize(total_number);
   points[3].resize(total_number);
 
-  points[0][0] = cv::Point2d(84, 1000);
-  points[0][total_number - 1] = cv::Point2d(997, 729);
+  points[0][0] = cv::Point2d(65, 749);
+  points[0][total_number - 1] = cv::Point2d(935, 501);
 
-  points[1][0] = cv::Point2d(742, 970);
-  points[1][total_number - 1] = cv::Point2d(1036,733);
+  points[1][0] = cv::Point2d(675, 765);
+  points[1][total_number - 1] = cv::Point2d(966, 505);
 
-  points[2][0] = cv::Point2d(1476, 976);
-  points[2][total_number - 1] = cv::Point2d(1100, 730);
+  points[2][0] = cv::Point2d(1410, 755);
+  points[2][total_number - 1] = cv::Point2d(1026, 509);
 
-  points[3][0] = cv::Point2d(1872, 852);
-  points[3][total_number - 1] = cv::Point2d(1139, 722);
+  points[3][0] = cv::Point2d(1811, 666);
+  points[3][total_number - 1] = cv::Point2d(1097, 509);
 
   auto FillPoints = [&points](const int id) {
     auto &line = points[id];
@@ -263,16 +261,17 @@ int main() {
 #endif
   }
   const double lane_interval = 3.6, stop_cost = 0.001;
-  double min_cost = std::numeric_limits<double>::max(), stop_iter_num = 1000;
+  double min_cost = std::numeric_limits<double>::max(), stop_iter_num = 1;
   std::vector<double> best(4);
 
 #define RAND_A_DOUBLE(a) \
   ((((rand() & 0xFFFF) / ((double)0xFFFF)) - 0.5) * 2 * (a))
 
   std::ofstream start_r("./start.csv");
+  
   while (min_cost > stop_cost && stop_iter_num-- >= 0) {
-    std::vector<double> res = { RAND_A_DOUBLE(0.1),RAND_A_DOUBLE(0.1),RAND_A_DOUBLE(0.1), 1.5 };
-
+    /*std::vector<double> res = { RAND_A_DOUBLE(1),RAND_A_DOUBLE(1),RAND_A_DOUBLE(1), 1.5 };*/
+    std::vector<double> res = { 0,0,0, 1.5 };
     start_r << stop_iter_num << "," << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << std::endl;
     ceres::Problem problem;
 
@@ -297,7 +296,7 @@ int main() {
 
     cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(), lane_interval, undistort_points[2], undistort_points[3]);
     problem.AddResidualBlock(cost_func, nullptr, res.data());
-
+    //problem.SetParameterLowerBound(res.data(), 3, 1);
     //LOG(ERROR) << "resudual number = " << problem.NumResidualBlocks() << "," << problem.NumResiduals() << std::endl;
 
     ceres::Solver::Options options;
@@ -360,7 +359,7 @@ int main() {
 
   for (int i = 0; i < 3; i++) {
     zdist[i](best.data(), residuals);
-    zdist[i](aim, residuals + 1);
+    //zdist[i](aim, residuals + 1);
     LOG(ERROR) << "ZLineDistance resudual[" << i << "] = " << residuals[0] << "-" << residuals[1];
   }
 
