@@ -204,7 +204,7 @@ void Ax_B(double a, double b, double c,
 
 int main() {
   std::string points_file("D:\\Projects\\BoardDetect\\Extrinsic\\res\\extrinsic_use\\points.yaml");
-  std::string camera_file("D:\\Projects\\BoardDetect\\resources\\hardwares\\D.yaml");
+  std::string camera_file("D:\\Projects\\DataSets\\20200521_C\\undist\\C.yaml");
 
   unsigned int rand_seed = FLAGS_rand_seed;
   if (FLAGS_rand_seed <= 0) {
@@ -222,19 +222,32 @@ int main() {
   points[1].resize(total_number);
   points[2].resize(total_number);
   points[3].resize(total_number);
+#if 0
+  points[0][0] = cv::Point2d(76, 488);
+  points[0][total_number - 1] = cv::Point2d(474, 361);
 
-  points[0][0] = cv::Point2d(84, 1000);
-  points[0][total_number - 1] = cv::Point2d(997, 729);
+  points[1][0] = cv::Point2d(346, 509);
+  points[1][total_number - 1] = cv::Point2d(541, 367);
 
-  points[1][0] = cv::Point2d(742, 970);
-  points[1][total_number - 1] = cv::Point2d(1036,733);
+  points[2][0] = cv::Point2d(819, 522);
+  points[2][total_number - 1] = cv::Point2d(637, 376);
 
-  points[2][0] = cv::Point2d(1476, 976);
-  points[2][total_number - 1] = cv::Point2d(1100, 730);
+  points[3][0] = cv::Point2d(1255, 517);
+  points[3][total_number - 1] = cv::Point2d(702, 366);
+#else
+  points[0][0] = cv::Point2d(21, 460);
+  points[0][total_number - 1] = cv::Point2d(442, 368);
 
-  points[3][0] = cv::Point2d(1872, 852);
-  points[3][total_number - 1] = cv::Point2d(1139, 722);
+  points[1][0] = cv::Point2d(338, 512);
+  points[1][total_number - 1] = cv::Point2d(531, 379);
 
+  points[2][0] = cv::Point2d(832, 522);
+  points[2][total_number - 1] = cv::Point2d(643, 377);
+
+  points[3][0] = cv::Point2d(755, 382);
+  points[3][total_number - 1] = cv::Point2d(1246, 521);
+
+#endif
   auto FillPoints = [&points](const int id) {
     auto &line = points[id];
     const int size = line.size() - 1;
@@ -263,7 +276,7 @@ int main() {
 #endif
   }
   const double lane_interval = 3.6, stop_cost = 0.001;
-  double min_cost = std::numeric_limits<double>::max(), stop_iter_num = 1000;
+  double min_cost = std::numeric_limits<double>::max(), stop_iter_num = 100;
   std::vector<double> best(4);
 
 #define RAND_A_DOUBLE(a) \
@@ -271,8 +284,8 @@ int main() {
 
   std::ofstream start_r("./start.csv");
   while (min_cost > stop_cost && stop_iter_num-- >= 0) {
-    std::vector<double> res = { RAND_A_DOUBLE(0.1),RAND_A_DOUBLE(0.1),RAND_A_DOUBLE(0.1), 1.5 };
-
+    //std::vector<double> res = { RAND_A_DOUBLE(1),RAND_A_DOUBLE(1),RAND_A_DOUBLE(1), 1.5 };
+    std::vector<double> res = { 0.0289033,-0.0291138,-0.00990462,1.58857 };
     start_r << stop_iter_num << "," << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << std::endl;
     ceres::Problem problem;
 
@@ -303,7 +316,8 @@ int main() {
     ceres::Solver::Options options;
     options.linear_solver_type = ceres::DENSE_SCHUR;
     options.minimizer_progress_to_stdout = true;
-    options.max_num_iterations = 100000;
+    options.logging_type = ceres::SILENT;
+    //options.max_num_iterations = 1000;
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
     //LOG(ERROR) << "FindRotation:" << summary.BriefReport();
