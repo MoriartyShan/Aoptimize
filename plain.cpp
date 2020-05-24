@@ -227,7 +227,9 @@ void read_points(const std::string &points_file,
     std::vector<std::vector<cv::Point2d>> &points) {
   MLOG() << "point = " << points_file;
   cv::FileStorage config(points_file, cv::FileStorage::READ);
-  CHECK(config.isOpened());
+  CHECK(config.isOpened()) << "points file:" << points_file 
+      << " load fail, make sure it is exist";
+  points.clear();
   for (int i = 1; ; i++) {
     std::string name = "image" + std::to_string(i);
     cv::FileNode &&node = config[name];
@@ -434,7 +436,7 @@ std::string show_points(const Params &parameters) {
   ss << "best result = [" << parameters.res[0] << "," << parameters.res[1]
              << "," << parameters.res[2] << "," << parameters.res[3] << "] " << parameters.final_cost << std::endl;
 
-  ss << "rotation = \n" << R;
+  ss << "rotation = \n" << R << std::endl;
   ss << "car_R_cam = \n" << R.inv() << std::endl;
 
   cv::Matx33d m_Matrix_ceres = parameters.camera_ptr->Intrinsic() * R;
@@ -495,6 +497,46 @@ bool get_a_good_start(Params &parameter) {
   return false;
 }
 
+void load_points(Params &parameters) {
+  const int points_number = 80;
+  read_points(FLAGS_point_file, parameters.points);
+  std::vector<double> places;
+  places.reserve(points_number);
+
+  for (int i = 0; i < points_number; i++) {
+    places.emplace_back(std::log(i + 1));
+  }
+
+  auto FillPoints = [&parameters, &points_number, &places](const int id) {
+    auto &line = parameters.points[id];
+    double last_p = std::log(points_number);
+
+    std::sort(line.begin(), line.end(), [](const cv::Point2d &l, const cv::Point2d &r) {
+      if (l.y < r.y || (l.y == r.y && l.x < r.x)) return true;
+      else return false;
+    });
+
+    line.resize(points_number);
+    cv::Point2d max_dist = (line[1] - line[0]);
+    for (int i = 1; i < points_number; i++) {
+      line[i] = line[0] + max_dist * places[i] / last_p;
+    }
+
+    std::sort(line.begin(), line.end(), [](const cv::Point2d &l, const cv::Point2d &r) {
+      if (l.y < r.y || (l.y == r.y && l.x < r.x)) return true;
+      else return false;
+    });
+
+  };
+  //cv::Mat img = cv::imread("D:\\Projects\\Documents\\20200518_D\\undistort/undist_2005181158164399.png", cv::IMREAD_UNCHANGED);
+  for (int i = 0; i < parameters.points.size(); i++) {
+    FillPoints(i);
+    //cv::line(img, points[i][0], points[i][total_number - 1], CV_RGB(255, 0, 0));
+  }
+  //cv::imwrite("D:\\Projects\\Documents\\20200518_D\\undistort/undist_undist_2005181158164399.png", img);
+
+}
+
 int main(int argc, char **argv) {
   google::SetVersionString("1.0.0");
   google::SetUsageMessage(std::string(argv[0]) + " [OPTION]");
@@ -509,52 +551,17 @@ int main(int argc, char **argv) {
   srand(rand_seed);
 
   auto camera_ptr = Camera::create(camera_file);
-  std::vector<std::vector<cv::Point2d>> points, undistort_points;
-  const int points_number = 80;
-  read_points(FLAGS_point_file, points);
-
-  auto FillPoints = [&points, &points_number](const int id) {
-    auto &line = points[id];
-    double last_p = std::log(points_number);
-    std::vector<double> places;
-    places.reserve(points_number);
-
-    line.resize(points_number);
-    cv::Point2d max_dist = (line[1] - line[0]);
-    for (int i = 1; i < points_number; i++) {
-      line[i] = line[0] + max_dist * std::log(i + 1) / last_p;
-    }
-  };
-  //cv::Mat img = cv::imread("D:\\Projects\\Documents\\20200518_D\\undistort/undist_2005181158164399.png", cv::IMREAD_UNCHANGED);
-  for (int i = 0; i < points.size(); i++) {
-    FillPoints(i);
-    //cv::line(img, points[i][0], points[i][total_number - 1], CV_RGB(255, 0, 0));
-  }
-  //cv::imwrite("D:\\Projects\\Documents\\20200518_D\\undistort/undist_undist_2005181158164399.png", img);
-
-  for (int i = 0; i < points.size(); i++) {
-    std::sort(points[i].begin(), points[i].end(), [](const cv::Point2d &l, const cv::Point2d &r) {
-      if (l.y < r.y || (l.y == r.y && l.x < r.x)) return true;
-      else return false;
-    });
-
-#if 0
-    cv::undistortPoints(points[i], undistort_points[i], camera_ptr->Intrinsic(), \
-      camera_ptr->Distortion(), cv::noArray(), camera_ptr->Intrinsic());
-#endif
-  }
-  undistort_points = points;
   Params parameters = {
     3.6,
     camera_ptr,
-    points,
+    std::vector<std::vector<cv::Point2d>>(),
     {0},
     0,
     0,
     std::numeric_limits<double>::max(),
     {0, 0, 0, 1.5},
   };
-
+  load_points(parameters);
 //  isResultGood(&parameters);
 //  LOG(ERROR) << show_points(parameters);
  // KEEP_CMD_WINDOW();
