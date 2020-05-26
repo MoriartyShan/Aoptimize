@@ -15,8 +15,12 @@ DEFINE_bool(has_init, false, "if set true, it start "
   "from the value write in points.yaml");
 
 #define LINE_PER_IMAGE 4
+#define PERFECT_THRESHOLD 0.002
+#define GOOD_THRESHOLD
 #define RAND_A_DOUBLE(a) \
   ((((rand() & 0xFFFF) / ((double)0xFFFF)) - 0.5) * 2 * (a))
+
+
 std::string toString(double *matrix) {
   std::stringstream matrix_string;
   matrix_string.precision(8);
@@ -328,15 +332,23 @@ RESAULT_LEVEL isResultGood(
   const Camera::CameraPtr camera_ptr = input_params->camera_ptr;
   const std::vector<std::vector<cv::Point2d>> &points = input_params->points;
   const double *res = input_params->res.data();
+  const double height_threshold = 0.5;
+  const double perfect_threshold = PERFECT_THRESHOLD;
+  const double angle_threshold = 0.4330;
+  const double tr_threshold = 0.9 * 3;
 
-  if (input_params->res[3] < 0.5) {
+  if (input_params->res[3] < height_threshold) {
     //judge if height is too small
-    MLOG() << "result height too small = " << res[0]
-           << "," << res[1] << "," << res[2] << "," << res[3];
+    MLOG() << "result height too small = "
+           << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+           << input_params->final_cost << "," << input_params->cur_min_cost;
     return RESAULT_LEVEL::BAD;
   }
 
-  if (input_params->final_cost < 0.002) {
+  if (input_params->final_cost < perfect_threshold) {
+    MLOG() << "get a perfect result = "
+      << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+      << input_params->final_cost << "," << input_params->cur_min_cost;
     return RESAULT_LEVEL::PERFECT;
   }
 
@@ -354,30 +366,33 @@ RESAULT_LEVEL isResultGood(
   for (int i = 0; i < residual_cal.size(); i++) {
     residual_cal[i](res, &residuals);
     if (residuals > 1) {
-      MLOG() << "bad result " << residuals;
+      MLOG() << "bad result because of residual["
+             << i << "]" << residuals << "-"
+             << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+             << input_params->final_cost << "," << input_params->cur_min_cost;
       return RESAULT_LEVEL::BAD;
-    } else {
-      MLOG() << "residual[" << i << "] = " << residuals;
     }
   }
 
   cv::Vec3d rv(res[0], res[1], res[2]);
   cv::Matx33d rotation;
-  MLOG() << "before " << rv;
   shrink_to_pi(rv);
-  MLOG() << "after " << rv;
 
-  if (cv::norm(rv) > 0.4330) {
+  if (cv::norm(rv) > angle_threshold) {
     //(0.25, 0.25, 0.25), whose rotation matrix is 0.9-0.9-0.9 tr
-    MLOG() << "too much rotation";
+    MLOG() << "too much rotation"
+           << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+           << input_params->final_cost << "," << input_params->cur_min_cost;
     return RESAULT_LEVEL::BAD;
   }
 
   cv::Rodrigues(rv, rotation);
 
-  double tr = rotation(0, 0) + rotation(1, 1) + rotation(2, 2);
-  if (tr < 0.9 * 3) {
-    MLOG() << "Too small tr " << tr << "\n" << rotation;
+  double tr = cv::trace(rotation);
+  if (tr < tr_threshold) {
+    MLOG() << "Too small tr " << tr << "\n" << rotation
+           << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+           << input_params->final_cost << "," << input_params->cur_min_cost;
     return RESAULT_LEVEL::BAD;
   }
 
@@ -385,29 +400,36 @@ RESAULT_LEVEL isResultGood(
   std::vector<std::vector<std::array<double, 3>>> point3ds(end - start,
       std::vector<std::array<double, 3>>(points[0].size()));
   for (int i = start; i < end; i++) {
+    int pos = i - start;
     for (int j = 0; j < points[i].size(); j++) {
       double uv[2] = { points[i][0].x, points[i][0].y };
-      Camera::GetPoint3d(m_Matrix.val, uv, res[3], point3ds[i][j].data());
-      if (point3ds[i][j][2] < 0) {
-        MLOG() << "all z value should be positive [" << point3ds[i][j][0] << ","
-               << point3ds[i][j][1] << "," << point3ds[i][j][2] << "]";
+      Camera::GetPoint3d(m_Matrix.val, uv, res[3], point3ds[pos][j].data());
+      if (point3ds[pos][j][2] < 0) {
+        MLOG() << "all z value should be positive [" << point3ds[pos][j][0] << ","
+               << point3ds[pos][j][1] << "," << point3ds[pos][j][2] << "]"
+               << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+               << input_params->final_cost << "," << input_params->cur_min_cost;
         return RESAULT_LEVEL::BAD;
       }
     }
 
-    if (i > 0) {
-      if (point3ds[i][0][0] - point3ds[i - 1][0][0] - dist > 0.5) {
-        MLOG() << "tow line distance is too much " << point3ds[i][0][0]
-               << "," << point3ds[i - 1][0][0] << ","
-               << point3ds[i][0][0] - point3ds[i - 1][0][0];
+    if (i%LINE_PER_IMAGE != 0) {
+      if (point3ds[pos][0][0] - point3ds[pos - 1][0][0] - dist > 0.5) {
+        MLOG() << "tow line distance is too much " << point3ds[pos][0][0]
+               << "," << point3ds[pos - 1][0][0] << ","
+               << point3ds[pos][0][0] - point3ds[pos - 1][0][0]
+               << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+               << input_params->final_cost << "," << input_params->cur_min_cost;
         return RESAULT_LEVEL::BAD;
       }
     }
   }
+  MLOG() << "get a good start [" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+         << input_params->final_cost << "," << input_params->cur_min_cost;
   return RESAULT_LEVEL::GOOD;
 }
 
-bool Optimize(Params &input_params) {
+bool Optimize(Params &input_params, ceres::LoggingType log_type = ceres::LoggingType::SILENT) {
   auto &camera_ptr = input_params.camera_ptr;
   auto &points = input_params.points;
   ceres::Problem problem;
@@ -428,19 +450,24 @@ bool Optimize(Params &input_params) {
   ceres::Solver::Options options;
   options.linear_solver_type = ceres::DENSE_SCHUR;
   options.minimizer_progress_to_stdout = true;
-  options.logging_type = ceres::SILENT;
+  options.logging_type = log_type;
   //options.max_num_iterations = 1000;
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
-  summary.BriefReport();
+  if (log_type != ceres::SILENT) {
+    MLOG() << summary.BriefReport();
+  }
+
   if (summary.termination_type == ceres::CONVERGENCE) {
     shrink_to_pi(input_params.res.data());
     input_params.final_cost = summary.final_cost;
+
     if (input_params.final_cost < input_params.cur_min_cost
         && RESAULT_LEVEL::GOOD >= isResultGood(&input_params)) {
+      MLOG() << "final_cost " << input_params.final_cost;
       //only if this is a better result than current
       input_params.cur_min_cost = input_params.final_cost;
-      memcpy(input_params.best.data(), input_params.res.data(), sizeof(double) * 4);
+      input_params.best = input_params.res;
       return true;
     }
     return false;
@@ -448,10 +475,11 @@ bool Optimize(Params &input_params) {
   return false;
 }
 
-std::string show_points(const Params &parameters) {
+void show_points(const Params &parameters, std::string& result) {
   cv::Vec3d r(parameters.res[0], parameters.res[1], parameters.res[2]);
   cv::Matx33d R;
   cv::Rodrigues(r, R);
+
   std::stringstream ss;
   ss << "best result = [" << parameters.res[0] << "," << parameters.res[1]
              << "," << parameters.res[2] << "," << parameters.res[3] << "] " << parameters.final_cost << std::endl;
@@ -460,7 +488,8 @@ std::string show_points(const Params &parameters) {
   ss << "car_R_cam = \n" << R.inv() << std::endl;
 
   cv::Matx33d m_Matrix_ceres = parameters.camera_ptr->Intrinsic() * R;
-
+  result = ss.str();
+  ss.str("");
   for (int i = 0; i < parameters.points.size(); i++) {
     ss << "line [" << i << "]\n";
     for (int j = 0; j < parameters.points[i].size(); j++) {
@@ -469,8 +498,10 @@ std::string show_points(const Params &parameters) {
       Camera::GetPoint3d(m_Matrix_ceres.val, uv, parameters.res[3], p3d);
       ss << "\t[" << j << "]-[" << uv[0] << "," << uv[1] << "]-[" << p3d[0] << "," << p3d[1] << "," << p3d[2] << "]\n";
     }
+    result += ss.str();
+    ss.str("");
   }
-  return ss.str();
+  return;
 }
 
 RESAULT_LEVEL optimize_from_zeros(Params &parameter) {
@@ -493,19 +524,28 @@ RESAULT_LEVEL optimize_from_zeros(Params &parameter) {
 RESAULT_LEVEL optimize_from_set(Params &parameter) {
   const int img_number = parameter.points.size() / LINE_PER_IMAGE;
   const std::vector<double> init = parameter.res;
+  bool has_good = false;
   for (int i = 0; i < img_number; i++) {
     parameter.res = init;
     parameter.idx = i;
-    Optimize(parameter);
+    if (Optimize(parameter)) {
+      has_good = true;
+    }
   }
   if (img_number > 1) {
     parameter.res = init;
     parameter.idx = -1;
-    Optimize(parameter);
+    if (Optimize(parameter)) {
+      has_good = true;
+    }
   }
-  parameter.res = parameter.best;
-  parameter.final_cost = parameter.cur_min_cost;
-  return isResultGood(&parameter);
+  if (has_good) {
+    parameter.res = parameter.best;
+    parameter.final_cost = parameter.cur_min_cost;
+    return isResultGood(&parameter);
+  }
+  return RESAULT_LEVEL::BAD;
+
 }
 
 RESAULT_LEVEL optimize_from_random(Params &parameter) {
@@ -549,6 +589,7 @@ bool optimize_from_good(Params &parameters) {
     if ((current_result_level == RESAULT_LEVEL::BAD)
         || ((current_result_level == RESAULT_LEVEL::GOOD) && parameters.isEqualtoBest(cur_best, cur_min_cost))) {
       //bad result or the same iterate
+      MLOG() << "stop this good start";
       return false;
     }
   } while (current_result_level == RESAULT_LEVEL::GOOD);
@@ -612,6 +653,7 @@ int main(int argc, char **argv) {
     rand_seed = time(0);
   }
   srand(rand_seed);
+  MLOG() << "rand seed = " << rand_seed;
 
   auto camera_ptr = Camera::create(camera_file);
   Params parameters = {
@@ -639,16 +681,20 @@ int main(int argc, char **argv) {
     if (current_result_level == RESAULT_LEVEL::GOOD) {
       if (optimize_from_good(parameters)) {
         current_result_level = RESAULT_LEVEL::PERFECT;
-        MLOG() << show_points(parameters);
+        break;
       }
     }
     current_result_level = optimize_from_random(parameters);
   }
 
   camera_ptr->set_Extrinsic(parameters.res.data());
-  camera_ptr->WriteToYaml(FLAGS_data + "/extrinsic33.yaml");
+  camera_ptr->WriteToYaml(FLAGS_data + "/extrinsic.yaml");
+  std::string string_result;
+  show_points(parameters, string_result);
+  for (int i = 0; i < string_result.size(); i+=100) {
+    std::cout << string_result.substr(i, 100);
+  }
 
-  LOG(ERROR) << show_points(parameters);
   KEEP_CMD_WINDOW();
 
   return 0;
