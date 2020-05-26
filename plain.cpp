@@ -271,6 +271,16 @@ void read_points(const std::string &points_file,
   CHECK(config.isOpened()) << "points file:" << points_file
       << " load fail, make sure it is exist";
   auto &&points = params.points;
+  bool distorted = false;
+  std::string type = config["points_type"].string();
+  if (type == "Distorted") {
+    distorted = true;
+  } else if (type == "Undistorted") {
+    distorted = false;
+  } else {
+    LOG(FATAL) << "points_type = " << type << ", invalid";
+  }
+
   points.clear();
   for (int i = 1; ; i++) {
     std::string name = "image" + std::to_string(i);
@@ -285,6 +295,26 @@ void read_points(const std::string &points_file,
       cv::read(node["line2"], points[cur_size + 1]);
       cv::read(node["line3"], points[cur_size + 2]);
       cv::read(node["line4"], points[cur_size + 3]);
+    }
+  }
+
+  if (!distorted) {
+    const double boundary = 30;
+    const double u_range[2] = { boundary, params.camera_ptr->ImageWidth() - boundary };
+    const double v_range[2] = { boundary, params.camera_ptr->ImageHeight() - boundary };
+    std::vector<cv::Point2d> tmp;
+    for (int i = 0; i < points.size(); i++) {
+      params.camera_ptr->UndistortPoints(points[i], tmp);
+      for (int j = 0; j < tmp.size(); j++) {
+        if (tmp[j].x > u_range[0] && tmp[j].x < u_range[1]
+            && tmp[j].y > v_range[0] && tmp[j].y < v_range[1]) {
+          //inside this contour after undistort, a good one
+        } else {
+          LOG(FATAL) << "Should change point " << points[i][j]
+              << " on line[" << i << "] more inside";
+        }
+      }
+      points[i] = tmp;
     }
   }
 
@@ -310,7 +340,7 @@ void shrink_to_pi(cv::Vec3d &rvec) {
   double mod = cv::norm(rvec);
   rvec /= mod;
   while (mod > M_PI) {
-    mod -= (M_PI);
+    mod -= (2 * M_PI);
   }
   rvec *= mod;
   return;
@@ -614,8 +644,6 @@ void load_points(Params &parameters) {
 
   auto FillPoints = [&parameters, &points_number, &places](const int id) {
     auto &line = parameters.points[id];
-
-
     std::sort(line.begin(), line.end(), [](const cv::Point2d &l, const cv::Point2d &r) {
       if (l.y > r.y || (l.y == r.y && l.x < r.x)) return true;
       else return false;
