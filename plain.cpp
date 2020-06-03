@@ -116,139 +116,61 @@ struct Params {
 // a line that all points' z value is different
 class ZLine {
 private:
-  std::vector<cv::Point2d> points;
-  cv::Matx33d _cameraK;
+  const cv::Point2d &_point;
+  const cv::Matx33d &_cameraK;
 public:
-  static ceres::CostFunction* Create(const cv::Matx33d& cameraK, const std::vector<cv::Point2d> &_points) {
-    return (new ceres::AutoDiffCostFunction<ZLine, 1, 4>(
-      new ZLine(cameraK, _points)));
+  static ceres::CostFunction* Create(
+      const cv::Matx33d& cameraK,
+      const cv::Point2d &point) {
+    return (new ceres::AutoDiffCostFunction<ZLine, 1, 4, 1>(
+      new ZLine(cameraK, point)));
   }
 
-  ZLine(const cv::Matx33d& cameraK, const std::vector<cv::Point2d> &_points) {
-    _cameraK = cameraK;
-    points = _points;
+  ZLine(
+      const cv::Matx33d& cameraK, 
+      const cv::Point2d &point) : 
+    _cameraK(cameraK), _point(point){
   };
 
   template <typename T>
-  bool operator()(const T* const aim, T* residuals) const {
-    std::vector<std::array<T, 2>> psz(points.size());
+  bool operator()(const T* const r_h, const T * const x, T* residuals) const {
     T Cam_R_Car[9], cameraK[9], m_matrix[9];
-    std::array<T, 2> average = { (T)0 };;
     ceres::MatrixAdapter<T, 3, 1> m_Matrix(m_matrix), Cam_R_Car_M(Cam_R_Car);
 
-    ceres::AngleAxisToRotationMatrix(aim, Cam_R_Car_M);
+    ceres::AngleAxisToRotationMatrix(r_h, Cam_R_Car_M);
     InsertMatrixToPointer(_cameraK, cameraK);
     MatrixMulti(cameraK, Cam_R_Car, m_matrix);
 
-    for (int i = 0; i < points.size(); i++) {
-      T uv[2] = {(T)points[i].x, (T)points[i].y};
-      T p3d[3];
-      Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
-      psz[i][1] = p3d[2];
-      psz[i][0] = p3d[0];
-      average[0] += psz[i][0];
-      average[1] += psz[i][1];
-    }
-    average[0] /= (T)points.size();
-    average[1] /= (T)points.size();
-    auto dev = GetDeviation(psz, average);
-    residuals[0] = ceres::abs(ceres::sqrt(dev[0]) / average[0]);
+    T uv[2] = { (T)_point.x, (T)_point.y };
+    T p3d[3];
+    Camera::GetPoint3d(m_matrix, uv, r_h[3], p3d);
+    residuals[0] = *x - p3d[0];
     return true;
   };
 };
 
 class ZLineDistance {
 private:
-  std::vector<cv::Point2d> _line1;
-  std::vector<cv::Point2d> _line2;
-  cv::Matx33d _cameraK;
   double _distance;
+  double _scale;
 public:
   static ceres::CostFunction* Create(
-      const cv::Matx33d& cameraK,
-      const double distance,
-      const std::vector<cv::Point2d>& line1,
-      const std::vector<cv::Point2d>& line2) {
-    return (new ceres::AutoDiffCostFunction<ZLineDistance, 1, 4>(
-      new ZLineDistance(cameraK, distance, line1, line2)));
+      const double distance, const double scale) {
+    return (new ceres::AutoDiffCostFunction<ZLineDistance, 1, 1, 1>(
+      new ZLineDistance(distance, scale)));
   }
 
   ZLineDistance(
-      const cv::Matx33d& cameraK,
-      const double distance,
-      const std::vector<cv::Point2d>& line1,
-      const std::vector<cv::Point2d>& line2) {
-    _cameraK = cameraK;
-    _distance = distance;
-    _line1 = line1;
-    _line2 = line2;
-  };
+      const double distance, const double scale) :
+      _distance(distance), _scale(scale){}
 
   template <typename T>
-  bool operator()(const T* const aim, T* residuals) const {
-    std::vector<std::array<T, 2>> line1(_line1.size());
-    std::vector<std::array<T, 2>> line2(_line2.size());
-    T Cam_R_Car[9], cameraK[9], m_matrix[9];
-    ceres::MatrixAdapter<T, 3, 1> m_Matrix(m_matrix), Cam_R_Car_Matrix(Cam_R_Car);
-
-    ceres::AngleAxisToRotationMatrix(aim, Cam_R_Car_Matrix);
-    InsertMatrixToPointer(_cameraK, cameraK);
-    MatrixMulti(cameraK, Cam_R_Car, m_matrix);
-
-    std::array<T, 2> average = { (T)0 };
-
-    for (int i = 0; i < _line1.size(); i++) {
-      T uv[2] = { (T)_line1[i].x, (T)_line1[i].y };
-      T p3d[3];
-
-      Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
-      line1[i][0] = p3d[0];
-      line1[i][1] = p3d[2];
-      average[0] += line1[i][0];
-    }
-
-    for (int i = 0; i < _line2.size(); i++) {
-      T uv[2] = { (T)_line2[i].x, (T)_line2[i].y };
-      T p3d[3];
-      Camera::GetPoint3d<T>(m_matrix, uv, aim[3], p3d);
-      line2[i][0] = p3d[0];
-      line2[i][1] = p3d[2];
-
-      average[1] += line2[i][0];
-    }
-
-    T max = (T)0, min = (T)100;
-    int l1, l2;
-    for (int i = 0; i < line1.size(); i++) {
-      for (int j = 0; j < line2.size(); j++) {
-        T dist = (line1[i][0] - line2[j][0]);
-        //LOG(ERROR) << dist;
-        if (dist < (T)0) {
-          dist = -dist;
-        }
-        if (max < dist) {
-          max = dist;
-          l1 = i;
-          l2 = j;
-        }
-        if (min > dist) {
-          min = dist;
-        }
-      }
-    }
-    max = max - (T)_distance;
-    min = min - (T)_distance;
-    residuals[0] = max * max + min * min;
+  bool operator()(const T* const x1, const T* const x2, T* residuals) const {
+    residuals[0] = (T)_distance - (*x2 - *x1);
+    residuals[0] *= (T)_scale;
     return true;
   };
 };
-
-void Ax_B(double a, double b, double c,
-  double m, double n, double p) {
-  double x = (c / b - p / n) / (a / b - m / n);
-  double y = (c / a - (p / m)) / (b / a - (n / m));
-  LOG(ERROR) << "res = " << x << "," << y;
-}
 
 void write_point(const std::string &points_file,
     const std::vector<std::vector<cv::Point2d>> &points) {
@@ -298,7 +220,7 @@ void read_points(const std::string &points_file,
     }
   }
 
-  if (!distorted) {
+  if (distorted) {
     const double boundary = 30;
     const double u_range[2] = { boundary, params.camera_ptr->ImageWidth() - boundary };
     const double v_range[2] = { boundary, params.camera_ptr->ImageHeight() - boundary };
@@ -354,7 +276,7 @@ void shrink_to_pi(double *vec) {
   vec[2] = rvec(2);
   return;
 }
-
+#if 0
 RESAULT_LEVEL isResultGood(
     const Params* input_params
     ) {
@@ -458,7 +380,7 @@ RESAULT_LEVEL isResultGood(
          << input_params->final_cost << "," << input_params->cur_min_cost;
   return RESAULT_LEVEL::GOOD;
 }
-
+#endif
 bool Optimize(Params &input_params, ceres::LoggingType log_type = ceres::LoggingType::SILENT) {
   auto &camera_ptr = input_params.camera_ptr;
   auto &points = input_params.points;
@@ -468,12 +390,16 @@ bool Optimize(Params &input_params, ceres::LoggingType log_type = ceres::Logging
   const int end = (input_params.idx == -1) ? points.size() : ((input_params.idx + 1) * LINE_PER_IMAGE);
   CHECK(end <= points.size()) << "wrong idx";
   for (int i = start; i < end; i++) {
-    auto cost_func = ZLine::Create(camera_ptr->Intrinsic(), points[i]);
-    problem.AddResidualBlock(cost_func, nullptr, input_params.res.data());
+    for (auto &p : points[i]) {
+      auto cost_func = ZLine::Create(camera_ptr->Intrinsic(), p);
+      LOG(ERROR) << "adding " << 4 + i - start;
+      problem.AddResidualBlock(cost_func, nullptr, input_params.res.data(), &input_params.res[4 + i - start]);
+    }
     if (i % LINE_PER_IMAGE != 0) {
-      cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(),
-        input_params.std_distance, points[i - 1], points[i]);
-      problem.AddResidualBlock(cost_func, nullptr, input_params.res.data());
+      auto cost_func = ZLineDistance::Create(
+        input_params.std_distance, points[i - 1].size() + points[i].size());
+      LOG(ERROR) << "adding " << 4 + i - start - 1;
+      problem.AddResidualBlock(cost_func, nullptr, &input_params.res[4 + i - start - 1], &input_params.res[4 + i - start]);
     }
   }
 
@@ -484,24 +410,8 @@ bool Optimize(Params &input_params, ceres::LoggingType log_type = ceres::Logging
   //options.max_num_iterations = 1000;
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
-  if (log_type != ceres::SILENT) {
-    MLOG() << summary.BriefReport();
-  }
-
-  if (summary.termination_type == ceres::CONVERGENCE) {
-    shrink_to_pi(input_params.res.data());
-    input_params.final_cost = summary.final_cost;
-
-    if (input_params.final_cost < input_params.cur_min_cost
-        && RESAULT_LEVEL::GOOD >= isResultGood(&input_params)) {
-      MLOG() << "final_cost " << input_params.final_cost;
-      //only if this is a better result than current
-      input_params.cur_min_cost = input_params.final_cost;
-      input_params.best = input_params.res;
-      return true;
-    }
-    return false;
-  }
+  MLOG() << summary.BriefReport();
+  
   return false;
 }
 
@@ -512,7 +422,7 @@ void show_points(const Params &parameters, std::string& result) {
 
   std::stringstream ss;
   ss << "best result = [" << parameters.res[0] << "," << parameters.res[1]
-             << "," << parameters.res[2] << "," << parameters.res[3] << "] " << parameters.final_cost << std::endl;
+             << "," << parameters.res[2] << "," << parameters.res[3] << "," << parameters.res[4] << "," << parameters.res[5] << "," << parameters.res[6] << "," << parameters.res[7] << "] " << parameters.final_cost << std::endl;
 
   ss << "rotation = \n" << R << std::endl;
   ss << "car_R_cam = \n" << R.inv() << std::endl;
@@ -533,7 +443,7 @@ void show_points(const Params &parameters, std::string& result) {
   }
   return;
 }
-
+#if 0
 RESAULT_LEVEL optimize_from_zeros(Params &parameter) {
   const int img_number = parameter.points.size() / LINE_PER_IMAGE;
   for (int i = 0; i < img_number; i++) {
@@ -625,6 +535,7 @@ bool optimize_from_good(Params &parameters) {
   } while (current_result_level == RESAULT_LEVEL::GOOD);
   return true;
 }
+#endif
 
 double my_log(const double a, const double b) {
   return std::log(a) / std::log(b);
@@ -688,6 +599,45 @@ int main(int argc, char **argv) {
     3.6,
     camera_ptr,
     std::vector<std::vector<cv::Point2d>>(),
+    {0, 0, 0, 1.5, 0, 1, 2, 3},
+    0,
+    0,
+    std::numeric_limits<double>::max(),
+    {0, 0, 0, 1.5},
+  };
+  load_points(parameters);
+
+  Optimize(parameters, ceres::LoggingType::PER_MINIMIZER_ITERATION);
+  std::string string_result;
+  show_points(parameters, string_result);
+
+  LOG(ERROR) << string_result;
+
+  KEEP_CMD_WINDOW();
+  return 0;
+}
+
+
+#if 0
+int main(int argc, char **argv) {
+  google::SetVersionString("1.0.0");
+  google::SetUsageMessage(std::string(argv[0]) + " [OPTION]");
+  google::ParseCommandLineFlags(&argc, &argv, false);
+  google::InitGoogleLogging(argv[0]);
+  std::string camera_file = FLAGS_data + "/camera.yaml";
+
+  unsigned int rand_seed = FLAGS_rand_seed;
+  if (FLAGS_rand_seed <= 0) {
+    rand_seed = time(0);
+  }
+  srand(rand_seed);
+  MLOG() << "rand seed = " << rand_seed;
+
+  auto camera_ptr = Camera::create(camera_file);
+  Params parameters = {
+    3.6,
+    camera_ptr,
+    std::vector<std::vector<cv::Point2d>>(),
     {0, 0, 0, 1.5},
     0,
     0,
@@ -727,3 +677,4 @@ int main(int argc, char **argv) {
 
   return 0;
 }
+#endif
