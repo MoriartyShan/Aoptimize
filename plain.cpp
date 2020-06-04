@@ -273,7 +273,7 @@ void read_points(const std::string &points_file,
   auto &&points = params.points;
   bool distorted = false;
   std::string type = config["points_type"].string();
-  if (type == "Distorted") {
+  if (type == "Raw") {
     distorted = true;
   } else if (type == "Undistorted") {
     distorted = false;
@@ -298,7 +298,7 @@ void read_points(const std::string &points_file,
     }
   }
 
-  if (!distorted) {
+  if (distorted) {
     const double boundary = 30;
     const double u_range[2] = { boundary, params.camera_ptr->ImageWidth() - boundary };
     const double v_range[2] = { boundary, params.camera_ptr->ImageHeight() - boundary };
