@@ -291,10 +291,16 @@ void read_points(const std::string &points_file,
       int cur_size = points.size();
       MLOG() << "read " << name;
       points.resize(cur_size + 4);
-      cv::read(node["line1"], points[cur_size]);
-      cv::read(node["line2"], points[cur_size + 1]);
-      cv::read(node["line3"], points[cur_size + 2]);
-      cv::read(node["line4"], points[cur_size + 3]);
+
+      for (int i = 0; i < 4; i++) {
+        std::string node_name = "line" + std::to_string(i + 1);
+        const cv::FileNode &sub_node = node[node_name];
+        if (sub_node.isNone()) {
+          LOG(ERROR) << "nothing named " << node_name << ", only " << i << " line input";
+          break;
+        }
+        cv::read(sub_node, points[cur_size + i]);
+      }
     }
   }
 
@@ -468,6 +474,11 @@ bool Optimize(Params &input_params, ceres::LoggingType log_type = ceres::Logging
   const int end = (input_params.idx == -1) ? points.size() : ((input_params.idx + 1) * LINE_PER_IMAGE);
   CHECK(end <= points.size()) << "wrong idx";
   for (int i = start; i < end; i++) {
+    if (points[i].size() == 0) {
+      CHECK(i == end - 1) << i << "," << end;
+      break;
+    }
+
     auto cost_func = ZLine::Create(camera_ptr->Intrinsic(), points[i]);
     problem.AddResidualBlock(cost_func, nullptr, input_params.res.data());
     if (i % LINE_PER_IMAGE != 0) {
@@ -644,6 +655,9 @@ void load_points(Params &parameters) {
 
   auto FillPoints = [&parameters, &points_number, &places](const int id) {
     auto &line = parameters.points[id];
+    if (line.empty()) {
+      return;
+    }
     std::sort(line.begin(), line.end(), [](const cv::Point2d &l, const cv::Point2d &r) {
       if (l.y > r.y || (l.y == r.y && l.x < r.x)) return true;
       else return false;
@@ -659,7 +673,7 @@ void load_points(Params &parameters) {
       if (l.y > r.y || (l.y == r.y && l.x < r.x)) return true;
       else return false;
     });
-
+    return;
   };
   //cv::Mat img = cv::imread("D:\\Projects\\Documents\\20200518_D\\undistort/undist_2005181158164399.png", cv::IMREAD_UNCHANGED);
   for (int i = 0; i < parameters.points.size(); i++) {
