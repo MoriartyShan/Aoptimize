@@ -14,13 +14,13 @@ DEFINE_string(data, "", "path to camera.yaml and points.yaml");
 DEFINE_bool(has_init, false, "if set true, it start "
   "from the value write in points.yaml");
 
-#define LINE_PER_IMAGE 4
 #define PERFECT_THRESHOLD 0.002
 #define GOOD_THRESHOLD
 #define RAND_A_DOUBLE(a) \
   ((((rand() & 0xFFFF) / ((double)0xFFFF)) - 0.5) * 2 * (a))
 
-
+#define DEFAULT_HEIGHT 4
+#define STD_DISTANCE 3.8
 std::string toString(double *matrix) {
   std::stringstream matrix_string;
   matrix_string.precision(8);
@@ -33,7 +33,7 @@ std::string toString(double *matrix) {
   return matrix_string.str();
 }
 
-//only for 3x3
+//only for 3x30.208046,0.0889651,0.00700095,4.64015
 template<typename T>
 void MatrixMulti(const T *left, const T *right, T* result) {
   const int rown = 3, coln = 3;
@@ -89,16 +89,29 @@ struct Params {
   double cur_min_cost;
   std::vector<double> best;
 
+  std::vector<int> size;//each image has @size lines
   void set_res_zeros() {
     memset(res.data(), 0, sizeof(double) * 3);
-    res[3] = 1.5;
+    res[3] = DEFAULT_HEIGHT;
+  }
+
+  int get_start() const {
+    int start = 0;
+    for (int i = 0; i < idx; i++) {
+      start += size[i];
+    }
+    return start;
+  }
+  int get_end(const int start) const {
+    CHECK(idx >= 0) << idx;
+    return start + size[idx];
   }
 
   void set_res_random() {
     res[0] = RAND_A_DOUBLE(1);
     res[1] = RAND_A_DOUBLE(1);
     res[2] = RAND_A_DOUBLE(1);
-    res[3] = 1.5;
+    res[3] = DEFAULT_HEIGHT;
   }
 
   bool isEqualtoBest(const std::vector<double>& outside, double cost) {
@@ -290,25 +303,37 @@ void read_points(const std::string &points_file,
     } else {
       int cur_size = points.size();
       MLOG() << "read " << name;
-      points.resize(cur_size + 4);
+      points.reserve(cur_size + 4);
 
-      for (int i = 0; i < 4; i++) {
+      for (int i = 0; ; i++) {
         std::string node_name = "line" + std::to_string(i + 1);
         const cv::FileNode &sub_node = node[node_name];
         if (sub_node.isNone()) {
-          LOG(ERROR) << "nothing named " << node_name << ", only " << i << " line input";
+          LOG(ERROR) << "nothing named " << node_name << ", only " << i
+                     << " line input";
+          params.size.emplace_back(i);
           break;
         }
+        LOG(ERROR) << node_name;
+        points.emplace_back();
         cv::read(sub_node, points[cur_size + i]);
+        LOG(ERROR) << "read sub node: " << node_name;
+        std::string pppp;
+        for (int j = 0; j < points[cur_size + i].size(); j++) {
+          pppp += ("[" + std::to_string(points[cur_size + i][j].x) + ","
+                   + std::to_string(points[cur_size + i][j].y) + "]");
+        }
+        LOG(ERROR) << pppp;
       }
     }
   }
-
+//  exit(0);
   if (distorted) {
     const double boundary = 30;
     const double u_range[2] = { boundary, params.camera_ptr->ImageWidth() - boundary };
     const double v_range[2] = { boundary, params.camera_ptr->ImageHeight() - boundary };
     std::vector<cv::Point2d> tmp;
+    LOG(ERROR) << "Undisting points";
     for (int i = 0; i < points.size(); i++) {
       params.camera_ptr->UndistortPoints(points[i], tmp);
       for (int j = 0; j < tmp.size(); j++) {
@@ -389,8 +414,8 @@ RESAULT_LEVEL isResultGood(
   }
 
   double residuals;
-  const int start = input_params->idx < 0 ? 0 : (input_params->idx * LINE_PER_IMAGE);
-  const int end = input_params->idx < 0 ? points.size() : ((input_params->idx + 1) * LINE_PER_IMAGE);
+  const int start = input_params->get_start();
+  const int end = input_params->get_end(start);
 
   std::vector<ZLine> residual_cal;
 
@@ -449,9 +474,9 @@ RESAULT_LEVEL isResultGood(
       }
     }
 
-    if (i%LINE_PER_IMAGE != 0) {
+    if (i != start) {
       if (point3ds[pos][0][0] - point3ds[pos - 1][0][0] - dist > 0.5) {
-        MLOG() << "tow line distance is too much " << point3ds[pos][0][0]
+        MLOG() << "two line distance is too much " << pos << "=" << point3ds[pos][0][0]
                << "," << point3ds[pos - 1][0][0] << ","
                << point3ds[pos][0][0] - point3ds[pos - 1][0][0]
                << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
@@ -470,9 +495,10 @@ bool Optimize(Params &input_params, ceres::LoggingType log_type = ceres::Logging
   auto &points = input_params.points;
   ceres::Problem problem;
 
-  const int start = (input_params.idx == -1) ? 0 : (input_params.idx * LINE_PER_IMAGE);
-  const int end = (input_params.idx == -1) ? points.size() : ((input_params.idx + 1) * LINE_PER_IMAGE);
+  const int start = input_params.get_start();
+  const int end = input_params.get_end(start);
   CHECK(end <= points.size()) << "wrong idx";
+  double stddist[] = {4.2, 3.57, 3.8};
   for (int i = start; i < end; i++) {
     if (points[i].size() == 0) {
       CHECK(i == end - 1) << i << "," << end;
@@ -481,9 +507,9 @@ bool Optimize(Params &input_params, ceres::LoggingType log_type = ceres::Logging
 
     auto cost_func = ZLine::Create(camera_ptr->Intrinsic(), points[i]);
     problem.AddResidualBlock(cost_func, nullptr, input_params.res.data());
-    if (i % LINE_PER_IMAGE != 0) {
+    if (i != start) {
       cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(),
-        input_params.std_distance, points[i - 1], points[i]);
+                                        stddist[i - start - 1], points[i - 1], points[i]);
       problem.AddResidualBlock(cost_func, nullptr, input_params.res.data());
     }
   }
@@ -546,7 +572,7 @@ void show_points(const Params &parameters, std::string& result) {
 }
 
 RESAULT_LEVEL optimize_from_zeros(Params &parameter) {
-  const int img_number = parameter.points.size() / LINE_PER_IMAGE;
+  const int img_number = parameter.size.size();
   for (int i = 0; i < img_number; i++) {
     parameter.set_res_zeros();
     parameter.idx = i;
@@ -563,7 +589,7 @@ RESAULT_LEVEL optimize_from_zeros(Params &parameter) {
 }
 
 RESAULT_LEVEL optimize_from_set(Params &parameter) {
-  const int img_number = parameter.points.size() / LINE_PER_IMAGE;
+  const int img_number = parameter.size.size();
   const std::vector<double> init = parameter.res;
   bool has_good = false;
   for (int i = 0; i < img_number; i++) {
@@ -590,7 +616,7 @@ RESAULT_LEVEL optimize_from_set(Params &parameter) {
 }
 
 RESAULT_LEVEL optimize_from_random(Params &parameter) {
-  const int img_number = parameter.points.size() / LINE_PER_IMAGE;
+  const int img_number = parameter.size.size();
   RESAULT_LEVEL result = RESAULT_LEVEL::BAD;
   while (true) {
     for (int i = 0; i < img_number; i++) {
@@ -675,12 +701,12 @@ void load_points(Params &parameters) {
     });
     return;
   };
-  //cv::Mat img = cv::imread("D:\\Projects\\Documents\\20200518_D\\undistort/undist_2005181158164399.png", cv::IMREAD_UNCHANGED);
+  cv::Mat img = cv::imread("/home/moriarty/WindowsD/Projects/WDataSets/HKvisionCalib/extrinsics/1023/undist.png", cv::IMREAD_UNCHANGED);
   for (int i = 0; i < parameters.points.size(); i++) {
     FillPoints(i);
-    //cv::line(img, points[i][0], points[i][total_number - 1], CV_RGB(255, 0, 0));
+    cv::line(img, parameters.points[i][0], parameters.points[i][points_number - 1], CV_RGB(255, 0, 0));
   }
-  //cv::imwrite("D:\\Projects\\Documents\\20200518_D\\undistort/undist_undist_2005181158164399.png", img);
+  cv::imwrite("/home/moriarty/WindowsD/Projects/WDataSets/HKvisionCalib/extrinsics/1023/undist_undist_2005181158164399.png", img);
 }
 
 int main(int argc, char **argv) {
@@ -699,14 +725,14 @@ int main(int argc, char **argv) {
 
   auto camera_ptr = Camera::create(camera_file);
   Params parameters = {
-    3.6,
+    STD_DISTANCE,
     camera_ptr,
     std::vector<std::vector<cv::Point2d>>(),
-    {0, 0, 0, 1.5},
+    {0, 0, 0, DEFAULT_HEIGHT},
     0,
     0,
     std::numeric_limits<double>::max(),
-    {0, 0, 0, 1.5},
+    {0, 0, 0, DEFAULT_HEIGHT},
   };
   load_points(parameters);
   RESAULT_LEVEL current_result_level = RESAULT_LEVEL::BAD;

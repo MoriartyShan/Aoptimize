@@ -17,3 +17,9 @@ target_link_libraries(${PROJECT_NAME}
      ceres
 		 common
 )
+project(TwoCameraExtrinsics)
+add_executable(${PROJECT_NAME} ${SOURCE_FILES} two_camera.cpp)
+target_link_libraries(${PROJECT_NAME}
+		ceres
+		common
+		)
