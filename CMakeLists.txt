@@ -23,3 +23,9 @@ target_link_libraries(${PROJECT_NAME}
 		ceres
 		common
 		)
+project(OneCameraExtrinsicSeperateLines)
+add_executable(${PROJECT_NAME} ${SOURCE_FILES} seperate_lines.cpp)
+target_link_libraries(${PROJECT_NAME}
+		ceres
+		common
+		)

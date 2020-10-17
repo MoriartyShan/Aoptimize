@@ -7,6 +7,9 @@
 #include <fstream>
 #include "../Common/camera.h"
 #include "../Common/utils.h"
+#include "common.h"
+#include "LinesDistanceCost.h"
+#include "PointsAtTheSameZLineCost.h"
 
 DEFINE_int32(rand_seed, -1, "> 1 as seed, 1 is special,"
   " <= 0 for random");
@@ -31,46 +34,6 @@ std::string toString(double *matrix) {
     matrix_string << "\n";
   }
   return matrix_string.str();
-}
-
-//only for 3x30.208046,0.0889651,0.00700095,4.64015
-template<typename T>
-void MatrixMulti(const T *left, const T *right, T* result) {
-  const int rown = 3, coln = 3;
-  for (int i = 0; i < rown; i++) {
-    for (int j = 0; j < coln; j++) {
-      int idx = i * coln + j;
-      result[idx] = (T)0;
-      for (int m = 0; m < coln; m++) {
-        result[idx] += left[i * coln + m] * right[m * coln + j];
-      }
-    }
-  }
-}
-
-template<typename T>
-std::array<T, 2> GetDeviation(const std::vector<std::array<T, 2>> &vectors, const std::array<T, 2>& ave) {
-  std::array<T, 2> res = { (T)0 };
-  for (auto &v : vectors) {
-    T d = v[0] - ave[0];
-    res[0] += (d * d);
-
-    d = v[1] - ave[1];
-    res[1] += (d * d);
-  }
-  res[0] /= (T)vectors.size();
-  res[1] /= (T)vectors.size();
-  return res;
-}
-
-template<typename T>
-void InsertMatrixToPointer(const cv::Matx33d &m, T *elem) {
-  for (int i = 0; i < 3; i++) {
-    for (int j = 0; j < 3; j++) {
-      elem[i * 3 + j] = (T)m(i, j);
-    }
-  }
-  return;
 }
 
 enum RESAULT_LEVEL {
@@ -124,136 +87,6 @@ struct Params {
   }
 
 
-};
-
-// a line that all points' z value is different
-class ZLine {
-private:
-  std::vector<cv::Point2d> points;
-  cv::Matx33d _cameraK;
-public:
-  static ceres::CostFunction* Create(const cv::Matx33d& cameraK, const std::vector<cv::Point2d> &_points) {
-    return (new ceres::AutoDiffCostFunction<ZLine, 1, 4>(
-      new ZLine(cameraK, _points)));
-  }
-
-  ZLine(const cv::Matx33d& cameraK, const std::vector<cv::Point2d> &_points) {
-    _cameraK = cameraK;
-    points = _points;
-  };
-
-  template <typename T>
-  bool operator()(const T* const aim, T* residuals) const {
-    std::vector<std::array<T, 2>> psz(points.size());
-    T Cam_R_Car[9], cameraK[9], m_matrix[9];
-    std::array<T, 2> average = { (T)0 };;
-    ceres::MatrixAdapter<T, 3, 1> m_Matrix(m_matrix), Cam_R_Car_M(Cam_R_Car);
-
-    ceres::AngleAxisToRotationMatrix(aim, Cam_R_Car_M);
-    InsertMatrixToPointer(_cameraK, cameraK);
-    MatrixMulti(cameraK, Cam_R_Car, m_matrix);
-
-    for (int i = 0; i < points.size(); i++) {
-      T uv[2] = {(T)points[i].x, (T)points[i].y};
-      T p3d[3];
-      Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
-      psz[i][1] = p3d[2];
-      psz[i][0] = p3d[0];
-      average[0] += psz[i][0];
-      average[1] += psz[i][1];
-    }
-    average[0] /= (T)points.size();
-    average[1] /= (T)points.size();
-    auto dev = GetDeviation(psz, average);
-    residuals[0] = ceres::abs(ceres::sqrt(dev[0]) / average[0]);
-    return true;
-  };
-};
-
-class ZLineDistance {
-private:
-  std::vector<cv::Point2d> _line1;
-  std::vector<cv::Point2d> _line2;
-  cv::Matx33d _cameraK;
-  double _distance;
-public:
-  static ceres::CostFunction* Create(
-      const cv::Matx33d& cameraK,
-      const double distance,
-      const std::vector<cv::Point2d>& line1,
-      const std::vector<cv::Point2d>& line2) {
-    return (new ceres::AutoDiffCostFunction<ZLineDistance, 1, 4>(
-      new ZLineDistance(cameraK, distance, line1, line2)));
-  }
-
-  ZLineDistance(
-      const cv::Matx33d& cameraK,
-      const double distance,
-      const std::vector<cv::Point2d>& line1,
-      const std::vector<cv::Point2d>& line2) {
-    _cameraK = cameraK;
-    _distance = distance;
-    _line1 = line1;
-    _line2 = line2;
-  };
-
-  template <typename T>
-  bool operator()(const T* const aim, T* residuals) const {
-    std::vector<std::array<T, 2>> line1(_line1.size());
-    std::vector<std::array<T, 2>> line2(_line2.size());
-    T Cam_R_Car[9], cameraK[9], m_matrix[9];
-    ceres::MatrixAdapter<T, 3, 1> m_Matrix(m_matrix), Cam_R_Car_Matrix(Cam_R_Car);
-
-    ceres::AngleAxisToRotationMatrix(aim, Cam_R_Car_Matrix);
-    InsertMatrixToPointer(_cameraK, cameraK);
-    MatrixMulti(cameraK, Cam_R_Car, m_matrix);
-
-    std::array<T, 2> average = { (T)0 };
-
-    for (int i = 0; i < _line1.size(); i++) {
-      T uv[2] = { (T)_line1[i].x, (T)_line1[i].y };
-      T p3d[3];
-
-      Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
-      line1[i][0] = p3d[0];
-      line1[i][1] = p3d[2];
-      average[0] += line1[i][0];
-    }
-
-    for (int i = 0; i < _line2.size(); i++) {
-      T uv[2] = { (T)_line2[i].x, (T)_line2[i].y };
-      T p3d[3];
-      Camera::GetPoint3d<T>(m_matrix, uv, aim[3], p3d);
-      line2[i][0] = p3d[0];
-      line2[i][1] = p3d[2];
-
-      average[1] += line2[i][0];
-    }
-
-    T max = (T)0, min = (T)100;
-    int l1, l2;
-    for (int i = 0; i < line1.size(); i++) {
-      for (int j = 0; j < line2.size(); j++) {
-        T dist = (line1[i][0] - line2[j][0]);
-        //LOG(ERROR) << dist;
-        if (dist < (T)0) {
-          dist = -dist;
-        }
-        if (max < dist) {
-          max = dist;
-          l1 = i;
-          l2 = j;
-        }
-        if (min > dist) {
-          min = dist;
-        }
-      }
-    }
-    max = max - (T)_distance;
-    min = min - (T)_distance;
-    residuals[0] = max * max + min * min;
-    return true;
-  };
 };
 
 void Ax_B(double a, double b, double c,
