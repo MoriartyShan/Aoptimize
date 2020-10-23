@@ -3,6 +3,7 @@
 #include <ceres/ceres.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
+#include <opencv2/plot.hpp>
 #include <gflags/gflags.h>
 #include <fstream>
 #include "../Common/camera.h"
@@ -10,12 +11,24 @@
 #include "common.h"
 #include "LinesDistanceCost.h"
 #include "PointsAtTheSameZLineCost.h"
+#include "PointAtAxisLineCost.h"
 
 DEFINE_int32(rand_seed, -1, "> 1 as seed, 1 is special,"
   " <= 0 for random");
-DEFINE_string(data, "", "path to camera.yaml and points.yaml");
+DEFINE_string(data, "", "path to camera.yaml, points.yaml,"
+                        " image.png/image.bmp, undist_image.png/undist_image.bmp");
+DEFINE_bool(undist_image, false, "put camera.yaml and image.png/bmp in "
+                                 "--data, it will write a undistored image in "
+                                 "--data, whose name is undist_image.png");
 DEFINE_bool(has_init, false, "if set true, it start "
   "from the value write in points.yaml");
+
+
+//std::vector<std::vector<cv::Point2d>> z_lines({
+//  {cv::Point2d(334, 158), cv::Point2d(517, 163)},
+//     {cv::Point2d(348, 299), cv::Point2d(632, 312)}
+//}
+//     );
 
 #define PERFECT_THRESHOLD 0.002
 #define GOOD_THRESHOLD
@@ -42,32 +55,29 @@ enum RESAULT_LEVEL {
   BAD = 2
 };
 struct Params {
-  double std_distance;
   Camera::CameraPtr camera_ptr;
-  std::vector<std::vector<cv::Point2d>> points;
-  std::vector<double> res;
-  int idx;
-  double final_cost;
-
-  double cur_min_cost;
+  std::string input_type;
+  std::vector<std::vector<cv::Point2d>> input_x_lines, input_z_lines;
+  std::vector<std::vector<cv::Point2d>> x_lines;
+  std::vector<std::vector<cv::Point2d>> z_lines;
+  std::vector<double> x_width;
+  std::vector<double> z_width;
+  std::vector<double> res;//cam_r_car + height
   std::vector<double> best;
+  double final_cost;
+  double cur_min_cost;
 
-  std::vector<int> size;//each image has @size lines
+  void init(Camera::CameraPtr camera) {
+    camera_ptr = camera;
+    best = {0, 0, 0, DEFAULT_HEIGHT};
+    res = {0, 0, 0, DEFAULT_HEIGHT};
+    final_cost = std::numeric_limits<double>::max();
+    cur_min_cost = final_cost;
+  }
+
   void set_res_zeros() {
     memset(res.data(), 0, sizeof(double) * 3);
     res[3] = DEFAULT_HEIGHT;
-  }
-
-  int get_start() const {
-    int start = 0;
-    for (int i = 0; i < idx; i++) {
-      start += size[i];
-    }
-    return start;
-  }
-  int get_end(const int start) const {
-    CHECK(idx >= 0) << idx;
-    return start + size[idx];
   }
 
   void set_res_random() {
@@ -88,7 +98,9 @@ struct Params {
 
 
 };
-
+double inline my_log(const double a, const double b) {
+  return std::log(a) / std::log(b);
+}
 void Ax_B(double a, double b, double c,
   double m, double n, double p) {
   double x = (c / b - p / n) / (a / b - m / n);
@@ -96,108 +108,244 @@ void Ax_B(double a, double b, double c,
   LOG(ERROR) << "res = " << x << "," << y;
 }
 
-void write_point(const std::string &points_file,
-    const std::vector<std::vector<cv::Point2d>> &points) {
-  cv::FileStorage config(points_file, cv::FileStorage::WRITE);
-  CHECK(config.isOpened());
-  cv::FileNode node;
-  config << "image1"
-         << "{" << "line1" << points[0] << "line2" << points[1]
-         << "line3" << points[2] << "line4" << points[3] << "}";
-  config << "image2"
-         << "{" << "line1" << points[4] << "line2" << points[5]
-         << "line3" << points[6] << "line4" << points[7] << "}";
+class PointsInputOutput {
+public:
+  const std::string _data_path;
+  const std::string _xlines = "xlines";
+  const std::string _zlines = "zlines";
+  const std::string _xwidth = "xwidth";
+  const std::string _zwidth = "zwidth";
+  const std::string _start = "start";
+  const std::string _points_type = "points_type";
+  PointsInputOutput(const std::string &data_path) : _data_path(data_path){
+    CHECK(!_data_path.empty()) << "must appoint a --data";
+  }
+  void write(const std::string &points_file, const Params &params) {
+    cv::FileStorage config(points_file, cv::FileStorage::WRITE);
+    CHECK(config.isOpened());
+    const std::string model = "line";
+    std::vector<cv::Point2d> line(2);
+    config << _points_type << params.input_type;//always output undistorted points
+    LOG(ERROR) << "type:" << params.input_type;
+    config << _xlines << params.input_x_lines;
+//    std::vector<std::vector<cv::Point2d>> a = params.input_z_lines;
+//    a.resize(1);
+    config << _zlines << params.input_z_lines;
 
-  config.release();
-}
+    config << _xwidth << params.x_width << _zwidth << params.z_width;
+    config << _start << params.best;
 
-void read_points(const std::string &points_file,
-  Params &params) {
-  cv::FileStorage config(points_file, cv::FileStorage::READ);
-  CHECK(config.isOpened()) << "points file:" << points_file
-      << " load fail, make sure it is exist";
-  auto &&points = params.points;
-  bool distorted = false;
-  std::string type = config["points_type"].string();
-  if (type == "Raw") {
-    distorted = true;
-  } else if (type == "Undistorted") {
-    distorted = false;
-  } else {
-    LOG(FATAL) << "points_type = " << type << ", invalid";
+    config.release();
   }
 
-  points.clear();
-  for (int i = 1; ; i++) {
-    std::string name = "image" + std::to_string(i);
-    cv::FileNode &&node = config[name];
-    if (node.isNone()) {
-      break;
+  void draw_undist_images(Camera::CameraPtr camera_ptr) {
+    std::string origin_image_path = _data_path + "/image.png";
+    cv::Mat img = cv::imread(origin_image_path, cv::IMREAD_COLOR);
+
+    if (img.empty()) {
+      LOG(ERROR) << "origin image (" << origin_image_path << ") is not exist, try image.bmp";
+      origin_image_path = _data_path + "/image.bmp";
+      img = cv::imread(origin_image_path, cv::IMREAD_COLOR);
+    }
+    if (img.empty()) {
+      LOG(FATAL) << "origin image (" << origin_image_path << ") is not exist, do normal calibrate";
+      return;
+    }
+
+    std::string undist_image_path = _data_path + "/undist_image.png";
+    cv::Mat undist_image = camera_ptr->UndistortImage(img);
+    cv::imwrite(undist_image_path, undist_image);
+    LOG(ERROR) << "finish undistort image to [" << undist_image_path << "]";
+  }
+
+  void read(Params &params) {
+    const std::string points_file = _data_path + "/points.yaml";
+    cv::FileStorage config(points_file, cv::FileStorage::READ);
+    CHECK(config.isOpened()) << "points file:" << points_file
+                             << " load fail, make sure it is exist";
+    bool distorted = false;
+
+    auto read_lines = [this, &config](
+        const std::string &node_name,
+        std::vector<std::vector<cv::Point2d>> &lines) {
+      cv::FileNode &&node = config[node_name];
+      CHECK(!node.isNone()) << "do not contains node: " << _xlines;
+      cv::read(node, lines);
+    };
+
+    auto undistort_points = [&params](
+        const std::vector<std::vector<cv::Point2d>> &input,
+        std::vector<std::vector<cv::Point2d>> &output) {
+      const auto camera_ptr = params.camera_ptr;
+      const double boundary = 10;
+      const double u_range[2] = { boundary, camera_ptr->ImageWidth() - boundary };
+      const double v_range[2] = { boundary, camera_ptr->ImageHeight() - boundary };
+      LOG(ERROR) << "Undisting points";
+      output.resize(input.size());
+      for (int i = 0; i < input.size(); i++) {
+        params.camera_ptr->UndistortPoints(input[i], output[i]);
+        for (int j = 0; j < output[i].size(); j++) {
+          if (output[i][j].x > u_range[0] && output[i][j].x < u_range[1]
+              && output[i][j].y > v_range[0] && output[i][j].y < v_range[1]) {
+            //inside this contour after undistort, a good one
+          } else {
+            LOG(FATAL) << "Should change point " << input[i][j]
+                       << " on line[" << i << "] more inside";
+          }
+        }
+      }
+    };
+
+    params.input_type = config[_points_type].string();
+    LOG(ERROR) << "type:" << params.input_type;
+    if (params.input_type == "Raw") {
+      distorted = true;
+    } else if (params.input_type == "Undistorted") {
+      distorted = false;
     } else {
-      int cur_size = points.size();
-      MLOG() << "read " << name;
-      points.reserve(cur_size + 4);
-
-      for (int i = 0; ; i++) {
-        std::string node_name = "line" + std::to_string(i + 1);
-        const cv::FileNode &sub_node = node[node_name];
-        if (sub_node.isNone()) {
-          LOG(ERROR) << "nothing named " << node_name << ", only " << i
-                     << " line input";
-          params.size.emplace_back(i);
-          break;
-        }
-        LOG(ERROR) << node_name;
-        points.emplace_back();
-        cv::read(sub_node, points[cur_size + i]);
-        LOG(ERROR) << "read sub node: " << node_name;
-        std::string pppp;
-        for (int j = 0; j < points[cur_size + i].size(); j++) {
-          pppp += ("[" + std::to_string(points[cur_size + i][j].x) + ","
-                   + std::to_string(points[cur_size + i][j].y) + "]");
-        }
-        LOG(ERROR) << pppp;
-      }
+      LOG(FATAL) << "points_type = " << params.input_type << ", invalid";
     }
-  }
-//  exit(0);
-  if (distorted) {
-    const double boundary = 30;
-    const double u_range[2] = { boundary, params.camera_ptr->ImageWidth() - boundary };
-    const double v_range[2] = { boundary, params.camera_ptr->ImageHeight() - boundary };
-    std::vector<cv::Point2d> tmp;
-    LOG(ERROR) << "Undisting points";
-    for (int i = 0; i < points.size(); i++) {
-      params.camera_ptr->UndistortPoints(points[i], tmp);
-      for (int j = 0; j < tmp.size(); j++) {
-        if (tmp[j].x > u_range[0] && tmp[j].x < u_range[1]
-            && tmp[j].y > v_range[0] && tmp[j].y < v_range[1]) {
-          //inside this contour after undistort, a good one
-        } else {
-          LOG(FATAL) << "Should change point " << points[i][j]
-              << " on line[" << i << "] more inside";
-        }
-      }
-      points[i] = tmp;
+    {
+      cv::FileNode &&node = config[_xwidth];
+      CHECK(!node.isNone()) << "do not contains node: " << _xwidth;
+      cv::read(node, params.x_width);
     }
-  }
+    {
+      cv::FileNode &&node = config[_zwidth];
+      CHECK(!node.isNone()) << "do not contains node: " << _zwidth;
+      cv::read(node, params.z_width);
+    }
 
-  auto nnode = config["start"];
-  if (!nnode.isNone()) {
-    cv::read(nnode, params.res);
-  }
-  config.release();
+    read_lines(_xlines, params.input_x_lines);
+    read_lines(_zlines, params.input_z_lines);
+    CHECK(params.input_x_lines.size() == (params.x_width.size() + 1)
+        || (params.x_width.size() == 0 && params.input_x_lines.size() == 0))
+        << "inconsistent x line size:" << params.x_width.size() << ","
+        << params.input_x_lines.size();
+    CHECK(params.input_z_lines.size() == (params.z_width.size() + 1)
+          || (params.z_width.size() == 0 && params.input_z_lines.size() == 0))
+            << "inconsistent z line size:" << params.z_width.size() << ","
+            << params.input_z_lines.size();
+
+    if (distorted) {
+      undistort_points(params.input_x_lines, params.x_lines);
+      undistort_points(params.input_z_lines, params.z_lines);
+    } else {
+      params.x_lines = params.input_x_lines;
+      params.z_lines = params.input_z_lines;
+    }
+
+    auto nnode = config[_start];
+    if (!nnode.isNone()) {
+      cv::read(nnode, params.res);
+      params.best = params.res;
+    }
+    config.release();
+
+
+    auto draw_line = [](cv::Mat &img, const std::vector<std::vector<cv::Point2d>>& lines) {
+      for (int i = 0; i < lines.size(); i++) {
+        cv::line(img, lines[i][0], lines[i][lines[i].size() - 1], CV_RGB(255, 0, 0));
+      }
+    };
+    std::string origin_image_path = _data_path + "/image.png";
+    cv::Mat img = cv::imread(origin_image_path, cv::IMREAD_COLOR);
+
+    if (img.empty()) {
+      LOG(ERROR) << "origin image (" << origin_image_path << ") is not exist, try image.bmp";
+      origin_image_path = _data_path + "/image.bmp";
+      img = cv::imread(origin_image_path, cv::IMREAD_COLOR);
+    }
+    if (img.empty()) {
+      LOG(ERROR) << "origin image (" << origin_image_path << ") is not exist, do normal calibrate";
+      return;
+    }
+    if (_points_type == "Raw") {
+      cv::Mat line_image = img.clone();
+      draw_line(line_image, params.input_x_lines);
+      draw_line(line_image, params.input_z_lines);
+      cv::imwrite(_data_path + "/image_line.png", line_image);
+    }
+
+    std::string undist_image_path = _data_path + "/undist_image.png";
+    cv::Mat undist_image = cv::imread(undist_image_path, cv::IMREAD_COLOR);
+    if (undist_image.empty()) {
+      undist_image = params.camera_ptr->UndistortImage(img);
+      cv::imwrite(undist_image_path, undist_image);
+    }
+    CHECK(!undist_image.empty());
+    {
+      draw_line(undist_image, params.x_lines);
+      draw_line(undist_image, params.z_lines);
+      cv::imwrite(_data_path + "/undist_image_line.png", undist_image);
+
+    }
+
+    cv::imwrite("/home/moriarty/WindowsD/Projects/WDataSets/HKvisionCalib/extrinsics/1022/undist_undist_2005181158164399.png", img);
+
 #if 0
-  MLOG() << "points = " << points.size();
-  for (int i = 0; i < points.size(); i++) {
-    std::string contain;
-    for (int j = 0; j < points[i].size(); j++) {
-      contain += ("[" + std::to_string(points[i][j].x) + "," + std::to_string(points[i][j].y) + "]");
+    MLOG() << "points = " << params.input_x_lines.size();
+    for (int i = 0; i < points.size(); i++) {
+      std::string contain;
+      for (int j = 0; j < points[i].size(); j++) {
+        contain += ("[" + std::to_string(points[i][j].x) + "," + std::to_string(points[i][j].y) + "]");
+      }
+      MLOG() << "contain " << contain;
     }
-    MLOG() << "contain " << contain;
-  }
 #endif//
-}
+  }
+
+  void insert_points(Params &parameters, const int points_number = 80) {
+    std::vector<double> places;
+
+#define USE_LOG(a) my_log( a, 10)
+    places.reserve(points_number);
+
+    for (int i = 0; i < points_number; i++) {
+      places.emplace_back(USE_LOG(i + 1));
+    }
+
+    auto FillXPoints = [&points_number, &places](std::vector<cv::Point2d> &line) {
+      if (line.empty()) {
+        return;
+      }
+      std::sort(line.begin(), line.end(), [](const cv::Point2d &l, const cv::Point2d &r) {
+        if (l.y > r.y || (l.y == r.y && l.x < r.x)) return true;
+        else return false;
+      });
+
+      line.resize(points_number);
+      cv::Point2d max_dist = (line[1] - line[0]);
+      for (int i = 1; i < points_number; i++) {
+        line[i] = line[0] + max_dist * places[i] / places.back();
+      }
+
+      std::sort(line.begin(), line.end(), [](const cv::Point2d &l, const cv::Point2d &r) {
+        if (l.y > r.y || (l.y == r.y && l.x < r.x)) return true;
+        else return false;
+      });
+      return;
+    };
+
+    for (int i = 0; i < parameters.x_lines.size(); i++) {
+      FillXPoints(parameters.x_lines[i]);
+      LOG(ERROR) << "line " << i << " size = " << parameters.x_lines[i].size();
+    }
+
+    //fill in z points
+    for (int i = 0; i < parameters.z_lines.size(); i++) {
+      LOG(ERROR) << i << ":" << parameters.z_lines[i][0] << "," << parameters.z_lines[i][1] << "," << parameters.z_lines[i].size();
+      cv::Point2d step = (parameters.z_lines[i][1] - parameters.z_lines[i][0]);
+      step /= (points_number - 1);
+      parameters.z_lines[i].resize(points_number);
+      for (int j = 1; j < points_number; j++) {
+        parameters.z_lines[i][j] = parameters.z_lines[i][0] + j * step;
+      }
+    }
+  }
+
+};
+
 
 //make a rotate vector length is inside 2 * Pi
 void shrink_to_pi(cv::Vec3d &rvec) {
@@ -222,9 +370,7 @@ void shrink_to_pi(double *vec) {
 RESAULT_LEVEL isResultGood(
     const Params* input_params
     ) {
-  const double &dist = input_params->std_distance;
   const Camera::CameraPtr camera_ptr = input_params->camera_ptr;
-  const std::vector<std::vector<cv::Point2d>> &points = input_params->points;
   const double *res = input_params->res.data();
   const double height_threshold = 0.5;
   const double perfect_threshold = PERFECT_THRESHOLD;
@@ -246,15 +392,16 @@ RESAULT_LEVEL isResultGood(
     return RESAULT_LEVEL::PERFECT;
   }
 
+  const auto &cameraK = camera_ptr->Intrinsic();
   double residuals;
-  const int start = input_params->get_start();
-  const int end = input_params->get_end(start);
-
-  std::vector<ZLine> residual_cal;
-
-  residual_cal.reserve(end - start);
-  for (int i = start; i < end; i++) {
-    residual_cal.emplace_back(camera_ptr->Intrinsic(), points[i]);
+  std::vector<AxisLine> residual_cal;
+  residual_cal.reserve(
+      input_params->x_lines.size() + input_params->z_lines.size());
+  for (int i = 0; i < input_params->x_lines.size(); i++) {
+    residual_cal.emplace_back(cameraK, input_params->x_lines[i], -1);
+  }
+  for (int i = 0; i < input_params->z_lines.size(); i++) {
+    residual_cal.emplace_back(cameraK, input_params->z_lines[i], 1);
   }
 
   for (int i = 0; i < residual_cal.size(); i++) {
@@ -291,60 +438,102 @@ RESAULT_LEVEL isResultGood(
   }
 
   cv::Matx33d m_Matrix = camera_ptr->Intrinsic() * rotation;
-  std::vector<std::vector<std::array<double, 3>>> point3ds(end - start,
-      std::vector<std::array<double, 3>>(points[0].size()));
-  for (int i = start; i < end; i++) {
-    int pos = i - start;
-    for (int j = 0; j < points[i].size(); j++) {
-      double uv[2] = { points[i][0].x, points[i][0].y };
-      Camera::GetPoint3d(m_Matrix.val, uv, res[3], point3ds[pos][j].data());
-      if (point3ds[pos][j][2] < 0) {
-        MLOG() << "all z value should be positive [" << point3ds[pos][j][0] << ","
-               << point3ds[pos][j][1] << "," << point3ds[pos][j][2] << "]"
-               << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
-               << input_params->final_cost << "," << input_params->cur_min_cost;
-        return RESAULT_LEVEL::BAD;
-      }
-    }
 
-    if (i != start) {
-      if (point3ds[pos][0][0] - point3ds[pos - 1][0][0] - dist > 0.5) {
-        MLOG() << "two line distance is too much " << pos << "=" << point3ds[pos][0][0]
-               << "," << point3ds[pos - 1][0][0] << ","
-               << point3ds[pos][0][0] - point3ds[pos - 1][0][0]
-               << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
-               << input_params->final_cost << "," << input_params->cur_min_cost;
-        return RESAULT_LEVEL::BAD;
+
+  auto check_points_and_lines = [&m_Matrix, &res, &input_params](
+      const std::vector<std::vector<cv::Point2d>> &lines,
+      const std::vector<double> &std_distance,
+      const int axis) {
+    //@axis = -1, std_distance is x distance
+    //@axis = 1, std_distance is z distance
+    const int cmp_idx = (axis < 0) ? 0 : 2;
+    const int line_num = lines.size();
+    std::vector<std::vector<std::array<double, 3>>> points3d(line_num);
+
+    for (int i = 0; i < line_num; i++) {
+      const int point_num = lines[i].size();
+      points3d[i].resize(point_num);
+      for (int j = 0; j < point_num; j++) {
+        double uv[2] = { lines[i][j].x, lines[i][j].y };
+        Camera::GetPoint3d(m_Matrix.val, uv, res[3], points3d[i][j].data());
+        if (points3d[i][j][2] < 0) {
+          MLOG() << "all z value should be positive [" << points3d[i][j][0] << ","
+                 << points3d[i][j][1] << "," << points3d[i][j][2] << "]"
+                 << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+                 << input_params->final_cost << "," << input_params->cur_min_cost;
+          return RESAULT_LEVEL::BAD;
+        }
+      }
+
+      if (i > 0) {
+        if (std_distance[i - 1] > 0 &&
+            (points3d[i][0][cmp_idx] - points3d[i - 1][0][cmp_idx] - std_distance[i - 1] > 0.5)) {
+          MLOG() << "two line distance is too much " << i << "=" << points3d[i][0][0]
+                 << "," << points3d[i - 1][0][0] << ","
+                 << points3d[i][0][0] - points3d[i - 1][0][0]
+                 << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+                 << input_params->final_cost << "," << input_params->cur_min_cost;
+          return RESAULT_LEVEL::BAD;
+        }
       }
     }
+    return RESAULT_LEVEL::GOOD;
+  };
+
+  if (check_points_and_lines(input_params->x_lines, input_params->x_width, -1)
+      == RESAULT_LEVEL::BAD) {
+    return RESAULT_LEVEL::BAD;
   }
+  if (check_points_and_lines(input_params->z_lines, input_params->z_width, 1)
+      == RESAULT_LEVEL::BAD) {
+    return RESAULT_LEVEL::BAD;
+  }
+
   MLOG() << "get a good start [" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
          << input_params->final_cost << "," << input_params->cur_min_cost;
+
   return RESAULT_LEVEL::GOOD;
 }
 
-bool Optimize(Params &input_params, ceres::LoggingType log_type = ceres::LoggingType::SILENT) {
+bool Optimize(
+    Params &input_params,
+    const ceres::LoggingType log_type = ceres::LoggingType::SILENT,
+    const bool fix_height = false) {
   auto &camera_ptr = input_params.camera_ptr;
-  auto &points = input_params.points;
+  const auto &cameraK = camera_ptr->Intrinsic();
+
   ceres::Problem problem;
-
-  const int start = input_params.get_start();
-  const int end = input_params.get_end(start);
-  CHECK(end <= points.size()) << "wrong idx";
-  double stddist[] = {4.2, 3.57, 3.8};
-  for (int i = start; i < end; i++) {
-    if (points[i].size() == 0) {
-      CHECK(i == end - 1) << i << "," << end;
-      break;
+  {
+    auto &x_lines = input_params.x_lines;
+    const int size = x_lines.size();
+    for (int i = 0; i < size; i++) {
+      CHECK(x_lines[i].size() > 0);
+      auto cost_func = AxisLine::Create(cameraK, x_lines[i], -1);
+      problem.AddResidualBlock(cost_func, nullptr, input_params.res.data(), input_params.res.data() + 3);
+      if ((!fix_height) && (i > 0) && (input_params.x_width[i - 1] > 0)) {
+//        LOG(FATAL) << "set std dist first";
+        cost_func = ZLineDistance::Create(
+            cameraK, input_params.x_width[i - 1], x_lines[i - 1], x_lines[i]);
+        problem.AddResidualBlock(cost_func, nullptr, input_params.res.data(), input_params.res.data() + 3);
+      }
     }
+  }
 
-    auto cost_func = ZLine::Create(camera_ptr->Intrinsic(), points[i]);
-    problem.AddResidualBlock(cost_func, nullptr, input_params.res.data());
-    if (i != start) {
-      cost_func = ZLineDistance::Create(camera_ptr->Intrinsic(),
-                                        stddist[i - start - 1], points[i - 1], points[i]);
-      problem.AddResidualBlock(cost_func, nullptr, input_params.res.data());
+  {
+    auto &z_lines = input_params.z_lines;
+    const int size = z_lines.size();
+    for (int i = 0; i < size; i++) {
+      CHECK(z_lines[i].size() > 0);
+
+      auto cost_func = AxisLine::Create(cameraK, z_lines[i], 1);
+      problem.AddResidualBlock(cost_func, nullptr, input_params.res.data(), input_params.res.data() + 3);
+      if ((!fix_height) && (i > 0) && (input_params.z_width[i - 1] > 0)) {
+        LOG(FATAL) << "set std dist first and z lines";
+      }
     }
+  }
+  if (fix_height) {
+    problem.SetParameterBlockConstant(input_params.res.data() + 3);
   }
 
   ceres::Solver::Options options;
@@ -375,6 +564,63 @@ bool Optimize(Params &input_params, ceres::LoggingType log_type = ceres::Logging
   return false;
 }
 
+void plot_points(const std::vector<double>& x, const std::vector<double>& y) {
+  double min[2] = {x[0], y[0]}, max[2] = {x[0], y[0]};
+  const int size = x.size();
+  CHECK(size == y.size()) << size << "," << y.size();
+
+  LOG(ERROR) << "point size = " << size;
+  for (int i = 1; i < size; i++) {
+//    LOG(ERROR) << "[" << i << "]" << x[i] << "," << y[i];
+    if (min[0] > x[i]) {
+      min[0] = x[i];
+    } else if (max[0] < x[i]) {
+      max[0] = x[i];
+    }
+    if (min[1] > y[i]) {
+      min[1] = y[i];
+    } else if (max[1] < y[i]) {
+      max[1] = y[i];
+    }
+  }
+
+  if (max[0] < 0) {
+    max[0] = 0.1;
+  } else if (min[0] > 0) {
+    min[0] = -0.1;
+  }
+
+  if (max[1] < 0) {
+    max[1] = 0.1;
+  } else if (min[1] > 0) {
+    min[1] = -0.1;
+  }
+
+
+  cv::Ptr<cv::plot::Plot2d> plot_ptr = cv::plot::createPlot2d(x, y);
+  cv::Mat img;
+//  LOG(ERROR) << plot_ptr.get();
+  plot_ptr->setNeedPlotLine(false);
+  plot_ptr->setPlotSize(1600, 800);
+  plot_ptr->setMaxX(max[0]);
+  plot_ptr->setMinX(min[0]);
+  plot_ptr->setMaxY(max[1]);
+  plot_ptr->setMinY(min[0]);
+
+//  const auto background_color = CV_RGB(255, 255, 255);
+//  const auto preground_color = CV_RGB(0, 0, 0);
+
+//  plot_ptr->setPlotBackgroundColor(background_color);
+////  plot_ptr->setPlotAxisColor()
+//  plot_ptr->setPlotGridColor(preground_color);
+//  plot_ptr->setPlotTextColor(preground_color);
+//  plot_ptr->setPlotLineColor(CV_RGB(0, 0, 255));
+//  LOG(ERROR) << plot_ptr.get();
+  plot_ptr->render(img);
+  cv::flip(img, img, 0);
+  cv::imshow("test", img);
+}
+
 void show_points(const Params &parameters, std::string& result) {
   cv::Vec3d r(parameters.res[0], parameters.res[1], parameters.res[2]);
   cv::Matx33d R;
@@ -390,55 +636,103 @@ void show_points(const Params &parameters, std::string& result) {
   cv::Matx33d m_Matrix_ceres = parameters.camera_ptr->Intrinsic() * R;
   result = ss.str();
   ss.str("");
-  for (int i = 0; i < parameters.points.size(); i++) {
+  std::vector<double> x, y;
+  std::vector<double> average(parameters.x_lines.size() + parameters.z_lines.size(), 0);
+
+  for (int i = 0; i < parameters.x_lines.size(); i++) {
+    const int start_idx = x.size();
+    x.reserve(parameters.x_lines.size() + x.size());
+    y.reserve(parameters.x_lines.size() + y.size());
     ss << "line [" << i << "]\n";
-    for (int j = 0; j < parameters.points[i].size(); j++) {
-      double uv[2] = { parameters.points[i][j].x, parameters.points[i][j].y };
+    for (int j = 0; j < parameters.x_lines[i].size(); j++) {
+      double uv[2] = { parameters.x_lines[i][j].x, parameters.x_lines[i][j].y };
       double p3d[3];
+      average[i] += p3d[0];
       Camera::GetPoint3d(m_Matrix_ceres.val, uv, parameters.res[3], p3d);
-      ss << "\t[" << j << "]-[" << uv[0] << "," << uv[1] << "]-[" << p3d[0] << "," << p3d[1] << "," << p3d[2] << "]\n";
+      if (j == 0 || (j == parameters.x_lines[i].size() - 1)) {
+        ss << "\t[" << j << "]-[" << p3d[0] << "," << p3d[1] << "," << p3d[2] << "]-[" << uv[0] << "," << uv[1] << "]\n";
+      }
+      x.emplace_back(p3d[0]);
+      y.emplace_back(p3d[2]);
     }
+
+    average[i] /= parameters.x_lines[i].size();
+    ss << "\tdiffs:" << x.back() - x[start_idx] << "," << y.back() - y[start_idx] << std::endl;
     result += ss.str();
+    result += ("\tline place:" + std::to_string(average[i]) + ",");
+    if (i > 0) {
+      double width = average[i] - average[i - 1];
+      result += (", width = " + std::to_string(width) + "\n");
+    } else {
+      result += "\n";
+    }
     ss.str("");
   }
+
+#if 0
+  for (int i = 0; i < z_lines.size(); i++) {
+    for (int j = 0; j < z_lines[i].size(); j++) {
+      double uv[2] = { z_lines[i][j].x, z_lines[i][j].y };
+      double p3d[3];
+      Camera::GetPoint3d(m_Matrix_ceres.val, uv, parameters.res[3], p3d);
+      x.emplace_back(p3d[0]);
+      y.emplace_back(p3d[2]);
+    }
+  }
+#else
+  for (int i = 0; i < parameters.z_lines.size(); i++) {
+    const int ave_idx = i + parameters.x_lines.size();
+    const int start_idx = x.size();
+    x.reserve(parameters.z_lines.size() + x.size());
+    y.reserve(parameters.z_lines.size() + y.size());
+    ss << "line [" << i << "]\n";
+    for (int j = 0; j < parameters.z_lines[i].size(); j++) {
+      double uv[2] = { parameters.z_lines[i][j].x, parameters.z_lines[i][j].y };
+      double p3d[3];
+      average[ave_idx] += p3d[2];
+      Camera::GetPoint3d(m_Matrix_ceres.val, uv, parameters.res[3], p3d);
+      if (j == 0 || (j == parameters.z_lines[i].size() - 1)) {
+        ss << "\t[" << j << "]-[" << p3d[0] << "," << p3d[1] << "," << p3d[2] << "]-[" << uv[0] << "," << uv[1] << "]\n";
+      }
+      x.emplace_back(p3d[0]);
+      y.emplace_back(p3d[2]);
+    }
+
+    average[ave_idx] /= parameters.z_lines[i].size();
+    ss << "\tdiffs:" << x.back() - x[start_idx] << "," << y.back() - y[start_idx] << std::endl;
+    result += ss.str();
+    result += ("\tline place:" + std::to_string(average[ave_idx]) + ",");
+    if (i > 0) {
+      double width = average[ave_idx] - average[ave_idx - 1];
+      result += (", width = " + std::to_string(width) + "\n");
+    } else {
+      result += "\n";
+    }
+    ss.str("");
+  }
+#endif
+
+  plot_points(x, y);
+
   return;
 }
 
 RESAULT_LEVEL optimize_from_zeros(Params &parameter) {
-  const int img_number = parameter.size.size();
-  for (int i = 0; i < img_number; i++) {
-    parameter.set_res_zeros();
-    parameter.idx = i;
-    Optimize(parameter);
-  }
-  if (img_number > 1) {
-    parameter.set_res_zeros();
-    parameter.idx = -1;
-    Optimize(parameter);
-  }
+  parameter.set_res_zeros();
+  Optimize(parameter);
   parameter.res = parameter.best;
   parameter.final_cost = parameter.cur_min_cost;
   return isResultGood(&parameter);
 }
 
 RESAULT_LEVEL optimize_from_set(Params &parameter) {
-  const int img_number = parameter.size.size();
   const std::vector<double> init = parameter.res;
   bool has_good = false;
-  for (int i = 0; i < img_number; i++) {
-    parameter.res = init;
-    parameter.idx = i;
-    if (Optimize(parameter)) {
-      has_good = true;
-    }
+
+  if (Optimize(parameter)) {
+    has_good = true;
   }
-  if (img_number > 1) {
-    parameter.res = init;
-    parameter.idx = -1;
-    if (Optimize(parameter)) {
-      has_good = true;
-    }
-  }
+
   if (has_good) {
     parameter.res = parameter.best;
     parameter.final_cost = parameter.cur_min_cost;
@@ -449,28 +743,14 @@ RESAULT_LEVEL optimize_from_set(Params &parameter) {
 }
 
 RESAULT_LEVEL optimize_from_random(Params &parameter) {
-  const int img_number = parameter.size.size();
+//  const int img_number = parameter.size.size();
   RESAULT_LEVEL result = RESAULT_LEVEL::BAD;
   while (true) {
-    for (int i = 0; i < img_number; i++) {
-      parameter.set_res_random();
-      parameter.idx = i;
-      if (Optimize(parameter)) {
-        result = isResultGood(&parameter);
-        if (result != BAD) {
-          return result;
-        }
-      }
-    }
-
-    if (img_number > 1) {
-      parameter.set_res_random();
-      parameter.idx = -1;
-      if (Optimize(parameter)) {
-        result = isResultGood(&parameter);
-        if (result != BAD) {
-          return result;
-        }
+    parameter.set_res_random();
+    if (Optimize(parameter)) {
+      result = isResultGood(&parameter);
+      if (result != BAD) {
+        return result;
       }
     }
   }
@@ -496,52 +776,6 @@ bool optimize_from_good(Params &parameters) {
   return true;
 }
 
-double my_log(const double a, const double b) {
-  return std::log(a) / std::log(b);
-}
-
-void load_points(Params &parameters) {
-  const int points_number = 80;
-  read_points(FLAGS_data + "/points.yaml", parameters);
-  std::vector<double> places;
-
-#define USE_LOG(a) my_log( a, 10)
-  places.reserve(points_number);
-
-  for (int i = 0; i < points_number; i++) {
-    places.emplace_back(USE_LOG(i + 1));
-  }
-
-  auto FillPoints = [&parameters, &points_number, &places](const int id) {
-    auto &line = parameters.points[id];
-    if (line.empty()) {
-      return;
-    }
-    std::sort(line.begin(), line.end(), [](const cv::Point2d &l, const cv::Point2d &r) {
-      if (l.y > r.y || (l.y == r.y && l.x < r.x)) return true;
-      else return false;
-    });
-
-    line.resize(points_number);
-    cv::Point2d max_dist = (line[1] - line[0]);
-    for (int i = 1; i < points_number; i++) {
-      line[i] = line[0] + max_dist * places[i] / places.back();
-    }
-
-    std::sort(line.begin(), line.end(), [](const cv::Point2d &l, const cv::Point2d &r) {
-      if (l.y > r.y || (l.y == r.y && l.x < r.x)) return true;
-      else return false;
-    });
-    return;
-  };
-  cv::Mat img = cv::imread("/home/moriarty/WindowsD/Projects/WDataSets/HKvisionCalib/extrinsics/1023/undist.png", cv::IMREAD_UNCHANGED);
-  for (int i = 0; i < parameters.points.size(); i++) {
-    FillPoints(i);
-    cv::line(img, parameters.points[i][0], parameters.points[i][points_number - 1], CV_RGB(255, 0, 0));
-  }
-  cv::imwrite("/home/moriarty/WindowsD/Projects/WDataSets/HKvisionCalib/extrinsics/1023/undist_undist_2005181158164399.png", img);
-}
-
 int main(int argc, char **argv) {
   google::SetVersionString("1.0.0");
   google::SetUsageMessage(std::string(argv[0]) + " [OPTION]");
@@ -557,17 +791,20 @@ int main(int argc, char **argv) {
   MLOG() << "rand seed = " << rand_seed;
 
   auto camera_ptr = Camera::create(camera_file);
-  Params parameters = {
-    STD_DISTANCE,
-    camera_ptr,
-    std::vector<std::vector<cv::Point2d>>(),
-    {0, 0, 0, DEFAULT_HEIGHT},
-    0,
-    0,
-    std::numeric_limits<double>::max(),
-    {0, 0, 0, DEFAULT_HEIGHT},
-  };
-  load_points(parameters);
+  PointsInputOutput io_helper(FLAGS_data);
+
+  if (FLAGS_undist_image) {
+    io_helper.draw_undist_images(camera_ptr);
+    return 0;
+  }
+
+  Params parameters;
+  parameters.init(camera_ptr);
+
+  io_helper.read(parameters);
+  io_helper.insert_points(parameters);
+  io_helper.write(FLAGS_data + "/out.yaml", parameters);
+
   RESAULT_LEVEL current_result_level = RESAULT_LEVEL::BAD;
   if (FLAGS_has_init) {
     current_result_level = optimize_from_set(parameters);
@@ -595,6 +832,7 @@ int main(int argc, char **argv) {
   for (int i = 0; i < string_result.size(); i+=100) {
     std::cout << string_result.substr(i, 100);
   }
+  cv::waitKey(0);
 
   KEEP_CMD_WINDOW();
 

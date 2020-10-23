@@ -16,6 +16,7 @@ add_executable(${PROJECT_NAME} ${SOURCE_FILES} plain.cpp)
 target_link_libraries(${PROJECT_NAME}
      ceres
 		 common
+		opencv_plot
 )
 project(TwoCameraExtrinsics)
 add_executable(${PROJECT_NAME} ${SOURCE_FILES} two_camera.cpp)

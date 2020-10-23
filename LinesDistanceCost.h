@@ -17,7 +17,7 @@ public:
       const double distance,
       const std::vector<cv::Point2d>& line1,
       const std::vector<cv::Point2d>& line2) {
-    return (new ceres::AutoDiffCostFunction<ZLineDistance, 1, 4>(
+    return (new ceres::AutoDiffCostFunction<ZLineDistance, 1, 3, 1>(
         new ZLineDistance(cameraK, distance, line1, line2)));
   }
 
@@ -33,13 +33,13 @@ public:
   };
 
   template <typename T>
-  bool operator()(const T* const aim, T* residuals) const {
+  bool operator()(const T* const cam_r_car, const T* const height, T* residuals) const {
     std::vector<std::array<T, 2>> line1(_line1.size());
     std::vector<std::array<T, 2>> line2(_line2.size());
     T Cam_R_Car[9], cameraK[9], m_matrix[9];
     ceres::MatrixAdapter<T, 3, 1> m_Matrix(m_matrix), Cam_R_Car_Matrix(Cam_R_Car);
 
-    ceres::AngleAxisToRotationMatrix(aim, Cam_R_Car_Matrix);
+    ceres::AngleAxisToRotationMatrix(cam_r_car, Cam_R_Car_Matrix);
     InsertMatrixToPointer(_cameraK, cameraK);
     MatrixMulti(cameraK, Cam_R_Car, m_matrix);
 
@@ -49,7 +49,7 @@ public:
       T uv[2] = { (T)_line1[i].x, (T)_line1[i].y };
       T p3d[3];
 
-      Camera::GetPoint3d(m_matrix, uv, aim[3], p3d);
+      Camera::GetPoint3d(m_matrix, uv, *height, p3d);
       line1[i][0] = p3d[0];
       line1[i][1] = p3d[2];
       average[0] += line1[i][0];
@@ -58,7 +58,7 @@ public:
     for (int i = 0; i < _line2.size(); i++) {
       T uv[2] = { (T)_line2[i].x, (T)_line2[i].y };
       T p3d[3];
-      Camera::GetPoint3d<T>(m_matrix, uv, aim[3], p3d);
+      Camera::GetPoint3d<T>(m_matrix, uv, *height, p3d);
       line2[i][0] = p3d[0];
       line2[i][1] = p3d[2];
 
@@ -66,7 +66,6 @@ public:
     }
 
     T max = (T)0, min = (T)100;
-    int l1, l2;
     for (int i = 0; i < line1.size(); i++) {
       for (int j = 0; j < line2.size(); j++) {
         T dist = (line1[i][0] - line2[j][0]);
@@ -76,8 +75,6 @@ public:
         }
         if (max < dist) {
           max = dist;
-          l1 = i;
-          l2 = j;
         }
         if (min > dist) {
           min = dist;

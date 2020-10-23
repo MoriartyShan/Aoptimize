@@ -24,7 +24,8 @@ public:
   template <typename T>
   bool operator()(const T* const v1, const T* const v2, T* residuals) const {
     T diff = (*v1 - *v2) - (T)_distance;
-    *residuals = ceres::exp(diff * diff);
+//    *residuals = ceres::exp(diff * diff);
+    *residuals = diff * (T)10000;
     return true;
   };
 };

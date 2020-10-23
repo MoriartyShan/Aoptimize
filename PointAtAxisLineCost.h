@@ -22,11 +22,21 @@ public:
     return (new ceres::AutoDiffCostFunction<PointAtAxisLine, 2, 3, 1, 1>(
         new PointAtAxisLine(point, cameraK, axis)));
   }
+  static ceres::CostFunction* CreateCompact(
+      const cv::Point2d& point, const cv::Matx33d& cameraK, const int axis) {
+    return (new ceres::AutoDiffCostFunction<PointAtAxisLine, 2, 4, 1>(
+        new PointAtAxisLine(point, cameraK, axis)));
+  }
 
   PointAtAxisLine(
       const cv::Point2d& point, const cv::Matx33d& cameraK, const int axis) :
-      _point(point), _cameraK(cameraK), _axis(axis) {};
-
+      _point(point), _cameraK(cameraK), _axis(axis) {
+//    LOG(ERROR) << "points = " << point;
+  };
+  template <typename T>
+  bool operator()(const T* const aim, const T* const value, T* residuals) const {
+    return operator()(aim, aim + 3, value, residuals);
+  }
   template <typename T>
   bool operator()(const T* const Cam_r_Car, const T* const height, const T* const value, T* residuals) const {
     T Cam_R_Car[9], cameraK[9], m_matrix[9];
@@ -43,7 +53,7 @@ public:
     if (_axis == 0) {
       r = p3d[0] - *value;
     } else if (_axis == 1){
-      r = p3d[2] - *value;
+      r = (p3d[2] - *value);
     } else {
       std::cout << __FILE__ << ":" << __LINE__ << ":" << " What a axis";
       exit(0);
@@ -52,9 +62,10 @@ public:
 
     residuals[1] = (T)0;
     if (p3d[2] < (T)0) {
-      residuals[1] = ceres::exp(-p3d[2]);
+      residuals[1] = -p3d[2];
     }
-//    LOG(ERROR) << "output residual " << p3d[0] << "," << p3d[2] << "," << r << "," << *value << "," << residuals[0] << "," << residuals[1];
+//    LOG(ERROR) << "output residual " << p3d[0] << "," << p3d[1] << "," << p3d[2] << "," << r << ","
+//    << *value << "," << residuals[0] << "," << residuals[1]; // << "," << -p3d[2] << "," << ceres::exp(-p3d[2]);
 
     return true;
   };

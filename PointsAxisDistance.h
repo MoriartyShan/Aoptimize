@@ -25,7 +25,7 @@ public:
       const cv::Matx33d& cameraK,
       const double distance,
       const int axis) {
-    return (new ceres::AutoDiffCostFunction<PointAxisDistance, 1, 3, 1>(
+    return (new ceres::AutoDiffCostFunction<PointAxisDistance, 2, 3, 1>(
         new PointAxisDistance(point1, point2, cameraK, distance, axis)));
   }
 
@@ -53,10 +53,15 @@ public:
     Camera::GetPoint3d(m_matrix, point22d, *height, p23d);
 
     if (_axis == 0l) {
-      residuals[0] = ceres::abs(p13d[0] - p23d[0]) - (T)_distance;
+      residuals[0] = (T)100 * (ceres::abs(p13d[0] - p23d[0]) - (T)_distance);
+      residuals[1] = (T)0;
     } else if (_axis == 1l) {
       residuals[0] = ceres::abs(p13d[2] - p23d[2]) - (T)_distance;
-    } else {
+      residuals[1] = (T)0;
+    } else if (_axis == 2l) {
+      residuals[0] = (p13d[0] - p23d[0])*(T)100;
+      residuals[1] = (T)100 * (p13d[0] - p23d[0]) / (p13d[2] - p23d[2]);
+    }else {
       std::cout << __FILE__ << ":" << __LINE__ << ":" << " What a axis";
       exit(0);
     }
