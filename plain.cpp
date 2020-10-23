@@ -619,6 +619,7 @@ void plot_points(const std::vector<double>& x, const std::vector<double>& y) {
   plot_ptr->render(img);
   cv::flip(img, img, 0);
   cv::imshow("test", img);
+  cv::imwrite(FLAGS_data + "/plot_imge.png", img);
 }
 
 void show_points(const Params &parameters, std::string& result) {
