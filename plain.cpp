@@ -3,7 +3,7 @@
 #include <ceres/ceres.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
-#include <opencv2/plot.hpp>
+#include "plot/plot.hpp"
 #include <gflags/gflags.h>
 #include <fstream>
 #include "../Common/camera.h"
