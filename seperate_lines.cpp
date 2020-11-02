@@ -378,7 +378,7 @@ void test_b() {
     LOG(ERROR) << start_idx << "," << i << "," << 0 << "," << (void *)r.val<< "," << (void *)&zms.back()[0] << "," << left_ptr;
     for (int j = 1; j < lines[i].size(); j++) {
       auto cost_func = XCalculateParam::Create(cameraK, lines[i][0], lines[i][j]);
-      zms.emplace_back(std::vector<double>({rand() % 10, rand() % 10}));
+      zms.emplace_back(std::vector<double>({(double)(rand() % 10), (double)(rand() % 10)}));
       cost_functions.emplace_back(cameraK, lines[i][0], lines[i][j]);
       if (i == 0 && (j == 15)) {
         ptr = zms[start_idx + j].data();
