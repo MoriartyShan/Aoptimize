@@ -31,6 +31,7 @@ DEFINE_bool(has_init, false, "if set true, it start "
 //     );
 
 #define PERFECT_THRESHOLD 0.002
+#define MAX_ITERATE_TIME 1000
 #define GOOD_THRESHOLD
 #define RAND_A_DOUBLE(a) \
   ((((rand() & 0xFFFF) / ((double)0xFFFF)) - 0.5) * 2 * (a))
@@ -298,7 +299,7 @@ public:
   void insert_points(Params &parameters, const int points_number = 80) {
     std::vector<double> places;
 
-#define USE_LOG(a) my_log( a, 10)
+#define USE_LOG(a) my_log( a, 3)
     places.reserve(points_number);
 
     for (int i = 0; i < points_number; i++) {
@@ -745,16 +746,12 @@ RESAULT_LEVEL optimize_from_set(Params &parameter) {
 
 RESAULT_LEVEL optimize_from_random(Params &parameter) {
 //  const int img_number = parameter.size.size();
-  RESAULT_LEVEL result = RESAULT_LEVEL::BAD;
-  while (true) {
+//  RESAULT_LEVEL result = RESAULT_LEVEL::BAD;
+//  while (true) {
     parameter.set_res_random();
-    if (Optimize(parameter)) {
-      result = isResultGood(&parameter);
-      if (result != BAD) {
-        return result;
-      }
-    }
-  }
+    Optimize(parameter);
+    return isResultGood(&parameter);
+//  }
 }
 
 //return true if it get a perfect result
@@ -763,6 +760,7 @@ bool optimize_from_good(Params &parameters) {
   std::vector<double> cur_best;
   double cur_min_cost;
   RESAULT_LEVEL current_result_level = RESAULT_LEVEL::BAD;
+  int c = 0;
   do {
     cur_best = parameters.best;
     cur_min_cost = parameters.cur_min_cost;
@@ -772,6 +770,8 @@ bool optimize_from_good(Params &parameters) {
       //bad result or the same iterate
       MLOG() << "stop this good start";
       return false;
+    } else {
+      LOG(ERROR) << "count " << c++;
     }
   } while (current_result_level == RESAULT_LEVEL::GOOD);
   return true;
@@ -816,6 +816,7 @@ int main(int argc, char **argv) {
     current_result_level = optimize_from_zeros(parameters);
   }
 
+  int count = 0;
   while (current_result_level != RESAULT_LEVEL::PERFECT) {
     if (current_result_level == RESAULT_LEVEL::GOOD) {
       if (optimize_from_good(parameters)) {
@@ -824,6 +825,15 @@ int main(int argc, char **argv) {
       }
     }
     current_result_level = optimize_from_random(parameters);
+    if (count++ > MAX_ITERATE_TIME) {
+      LOG(ERROR) << "currently minimal residual is " << parameters.cur_min_cost
+                 << ", out put it(" << count << ")";
+      parameters.res = parameters.best;
+      break;
+    } else if (count % 100 == 50) {
+      LOG(ERROR) << "currently minimal residual is " << parameters.cur_min_cost
+                 << ", iterate time = " << count;
+    }
   }
 
   camera_ptr->set_Extrinsic(parameters.res.data());
