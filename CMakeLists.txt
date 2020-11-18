@@ -32,3 +32,10 @@ target_link_libraries(${PROJECT_NAME}
 		ceres
 		common
 		)
+
+project(OneCameraExtrinsicPointsDistance)
+add_executable(${PROJECT_NAME} ${SOURCE_FILES} points_distance.cpp)
+target_link_libraries(${PROJECT_NAME}
+		ceres
+		common
+		)

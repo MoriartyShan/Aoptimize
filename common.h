@@ -7,7 +7,7 @@
 #include <array>
 #include <vector>
 #include <opencv2/opencv.hpp>
-//only for 3x30.208046,0.0889651,0.00700095,4.64015
+//only for 3x3
 template<typename T>
 void MatrixMulti(const T *left, const T *right, T* result) {
   const int rown = 3, coln = 3;
