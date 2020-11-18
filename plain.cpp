@@ -1,17 +1,13 @@
-#include <ceres/rotation.h>
-#include <ceres/cost_function.h>
-#include <ceres/ceres.h>
+#include "../Common/camera.h"
+#include "LinesDistanceCost.h"
+#include "PointsAtTheSameZLineCost.h"
+#include "PointDistanceCost.h"
+
 #include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
 #include "plot/plot.hpp"
 #include <gflags/gflags.h>
 #include <fstream>
-#include "../Common/camera.h"
-#include "../Common/utils.h"
-#include "common.h"
-#include "LinesDistanceCost.h"
-#include "PointsAtTheSameZLineCost.h"
-#include "PointAtAxisLineCost.h"
 
 DEFINE_int32(rand_seed, -1, "> 1 as seed, 1 is special,"
   " <= 0 for random");
@@ -55,6 +51,71 @@ enum RESAULT_LEVEL {
   GOOD = 1,
   BAD = 2
 };
+
+struct PointsDistancePair {
+  static const size_t data_size = 5;
+  cv::Point2d _point1;
+  cv::Point2d _point2;
+  float _distance;
+
+  PointsDistancePair(){}
+  PointsDistancePair(const double *data) {
+    _point1.x = data[0];
+    _point1.y = data[1];
+    _point2.x = data[2];
+    _point2.y = data[3];
+    _distance = data[4];
+  }
+  void output(double *data) const {
+    data[0] = _point1.x;
+    data[1] = _point1.y;
+    data[2] = _point2.x;
+    data[3] = _point2.y;
+    data[4] = _distance;
+  }
+
+  static void write(
+      cv::FileStorage &fs,
+      const std::string &name,
+      const std::vector<PointsDistancePair> &pairs) {
+    if (!fs.isOpened()) {
+      LOG(FATAL) << "fs is not opened";
+    }
+    std::vector<std::vector<double>> tmp;
+    size_t size = pairs.size();
+    tmp.resize(size, std::vector<double>(data_size));
+    for (size_t i = 0; i < size; i++) {
+      pairs[i].output(tmp[i].data());
+    }
+//    cv::write(fs, name, tmp);
+    fs << name << tmp;
+  }
+
+  static void read(
+      const cv::FileStorage &fs,
+      const std::string &name,
+      std::vector<PointsDistancePair> &pairs) {
+    if (!fs.isOpened()) {
+      LOG(FATAL) << "fs is not opened";
+    }
+    std::vector<std::vector<double>> tmp;
+    auto node = fs[name];
+    pairs.clear();
+    if (node.isNone()) {
+      return;
+    }
+
+    cv::read(node, tmp);
+    size_t size = tmp.size();
+    if (size > 0) {
+      pairs.reserve(size);
+      for (int i = 0; i < size; i++) {
+        pairs.emplace_back(tmp[i].data());
+      }
+    }
+  }
+};
+
 struct Params {
   Camera::CameraPtr camera_ptr;
   std::string input_type;
@@ -65,6 +126,9 @@ struct Params {
   std::vector<double> z_width;
   std::vector<double> res;//cam_r_car + height
   std::vector<double> best;
+
+  std::vector<PointsDistancePair> points_distance_pairs;
+
   double final_cost;
   double cur_min_cost;
 
@@ -121,6 +185,7 @@ public:
   PointsInputOutput(const std::string &data_path) : _data_path(data_path){
     CHECK(!_data_path.empty()) << "must appoint a --data";
   }
+
   void write(const std::string &points_file, const Params &params) {
     cv::FileStorage config(points_file, cv::FileStorage::WRITE);
     CHECK(config.isOpened());
@@ -135,6 +200,8 @@ public:
 
     config << _xwidth << params.x_width << _zwidth << params.z_width;
     config << _start << params.best;
+
+    PointsDistancePair::write(config, "points_distance", params.points_distance_pairs);
 
     config.release();
   }
@@ -241,6 +308,9 @@ public:
       cv::read(nnode, params.res);
       params.best = params.res;
     }
+
+    PointsDistancePair::read(config, "points_distance", params.points_distance_pairs);
+
     config.release();
 
 
@@ -504,18 +574,19 @@ bool Optimize(
   const auto &cameraK = camera_ptr->Intrinsic();
 
   ceres::Problem problem;
+  double *r_ptr = input_params.res.data(), *h_ptr = input_params.res.data() + 3;
   {
     auto &x_lines = input_params.x_lines;
     const int size = x_lines.size();
     for (int i = 0; i < size; i++) {
       CHECK(x_lines[i].size() > 0);
       auto cost_func = AxisLine::Create(cameraK, x_lines[i], -1);
-      problem.AddResidualBlock(cost_func, nullptr, input_params.res.data(), input_params.res.data() + 3);
+      problem.AddResidualBlock(cost_func, nullptr, r_ptr, h_ptr);
       if ((!fix_height) && (i > 0) && (input_params.x_width[i - 1] > 0)) {
 //        LOG(FATAL) << "set std dist first";
         cost_func = ZLineDistance::Create(
             cameraK, input_params.x_width[i - 1], x_lines[i - 1], x_lines[i]);
-        problem.AddResidualBlock(cost_func, nullptr, input_params.res.data(), input_params.res.data() + 3);
+        problem.AddResidualBlock(cost_func, nullptr, r_ptr, h_ptr);
       }
     }
   }
@@ -527,12 +598,18 @@ bool Optimize(
       CHECK(z_lines[i].size() > 0);
 
       auto cost_func = AxisLine::Create(cameraK, z_lines[i], 1);
-      problem.AddResidualBlock(cost_func, nullptr, input_params.res.data(), input_params.res.data() + 3);
+      problem.AddResidualBlock(cost_func, nullptr, r_ptr, h_ptr);
       if ((!fix_height) && (i > 0) && (input_params.z_width[i - 1] > 0)) {
         LOG(FATAL) << "set std dist first and z lines";
       }
     }
   }
+
+  for (auto &p : input_params.points_distance_pairs) {
+    auto cost_func = PointDistance::Create(p._distance, p._point1, p._point2, cameraK);
+    problem.AddResidualBlock(cost_func, nullptr, r_ptr, h_ptr);
+  }
+
   if (fix_height) {
     problem.SetParameterBlockConstant(input_params.res.data() + 3);
   }
@@ -558,6 +635,11 @@ bool Optimize(
       //only if this is a better result than current
       input_params.cur_min_cost = input_params.final_cost;
       input_params.best = input_params.res;
+//      cv::Vec2d residuals;
+//      for (auto &c : PointDistance_costs) {
+//        c(r_ptr, h_ptr, residuals.val);
+//        LOG(ERROR) << residuals;
+//      }
       return true;
     }
     return false;
@@ -630,7 +712,7 @@ void show_points(const Params &parameters, std::string& result) {
 
   std::stringstream ss;
   ss << "best result = [" << parameters.res[0] << "," << parameters.res[1]
-             << "," << parameters.res[2] << "," << parameters.res[3] << "] " << parameters.final_cost << std::endl;
+             << "," << parameters.res[2] << "," << parameters.res[3] << "] " << parameters.cur_min_cost << std::endl;
 
   ss << "rotation = \n" << R << std::endl;
   ss << "car_R_cam = \n" << R.inv() << std::endl;
@@ -803,8 +885,40 @@ int main(int argc, char **argv) {
   parameters.init(camera_ptr);
 
   io_helper.read(parameters);
+#if 0
+  {
+
+    std::vector<cv::Point2d> points2d;
+    std::vector<float> dist = { 39.16, 15.5, 39.46, 15.6 };
+    std::vector<PointDistance> PointDistance_costs;
+    //41.4988, 16.2077, 42.8797, 15.5055  from good extrinsics
+    // { 37.06, 15.43, 37, 15.65 }; from mesure
+    //  std::vector<float> dist = { 38.4, 15.8, 39.178, 16 }; from google earth
+
+    points2d.emplace_back(0, 719);
+    points2d.emplace_back(470, 241);
+    points2d.emplace_back(745, 235);
+    points2d.emplace_back(1230, 669);
+
+    parameters.points_distance_pairs.reserve(4);
+    for (int i = 0; i < 4; i++) {
+      PointsDistancePair tmp_p;
+      tmp_p._point1.x = points2d[i].x;
+      tmp_p._point1.y = points2d[i].y;
+      tmp_p._distance = dist[i];
+      if (i < 3) {
+        tmp_p._point2.x = points2d[i + 1].x;
+        tmp_p._point2.y = points2d[i + 1].y;
+      } else {
+        tmp_p._point2.x = points2d[0].x;
+        tmp_p._point2.y = points2d[0].y;
+      }
+      parameters.points_distance_pairs.emplace_back(tmp_p);
+    }
+  }
+#endif
   io_helper.insert_points(parameters);
-  io_helper.write(FLAGS_data + "/out.yaml", parameters);
+//  io_helper.write(FLAGS_data + "/out.yaml", parameters);
 
   RESAULT_LEVEL current_result_level = RESAULT_LEVEL::BAD;
   if (FLAGS_has_init) {

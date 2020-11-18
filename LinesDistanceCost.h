@@ -4,6 +4,11 @@
 
 #ifndef BOARDDETECT_LINESDISTANCECOST_H
 #define BOARDDETECT_LINESDISTANCECOST_H
+#include "common.h"
+
+#include <ceres/rotation.h>
+#include <ceres/cost_function.h>
+#include <ceres/ceres.h>
 
 class ZLineDistance {
 private:
