@@ -5,7 +5,7 @@
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
-#include "plot/plot.hpp"
+#include "cv_plot/plot.hpp"
 #include <gflags/gflags.h>
 #include <fstream>
 
