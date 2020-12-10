@@ -32,7 +32,7 @@ void read_points(
       break;
     } else {
       int cur_size = lines.size();
-      MLOG() << "read " << name;
+      LOG(ERROR) << "read " << name;
       lines.reserve(cur_size + 4);
 
       for (int i = 0; ; i++) {
@@ -229,7 +229,7 @@ void test_a() {
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
 
-  MLOG() << summary.BriefReport();
+  LOG(ERROR) << summary.BriefReport();
 
   cv::Matx33d cam_R_car;
   cv::Rodrigues(cam_r_car, cam_R_car);
@@ -404,7 +404,7 @@ void test_b() {
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
 
-  MLOG() << summary.BriefReport();
+  LOG(ERROR) << summary.BriefReport();
   LOG(ERROR) << summary.FullReport();
   LOG(ERROR) << "result values = " << r;
 

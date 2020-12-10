@@ -355,13 +355,13 @@ public:
     cv::imwrite("/home/moriarty/WindowsD/Projects/WDataSets/HKvisionCalib/extrinsics/1022/undist_undist_2005181158164399.png", img);
 
 #if 0
-    MLOG() << "points = " << params.input_x_lines.size();
+    LOG(ERROR) << "points = " << params.input_x_lines.size();
     for (int i = 0; i < points.size(); i++) {
       std::string contain;
       for (int j = 0; j < points[i].size(); j++) {
         contain += ("[" + std::to_string(points[i][j].x) + "," + std::to_string(points[i][j].y) + "]");
       }
-      MLOG() << "contain " << contain;
+      LOG(ERROR) << "contain " << contain;
     }
 #endif//
   }
@@ -450,14 +450,14 @@ RESAULT_LEVEL isResultGood(
 
   if (input_params->res[3] < height_threshold) {
     //judge if height is too small
-    MLOG() << "result height too small = "
+    LOG(ERROR) << "result height too small = "
            << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
            << input_params->final_cost << "," << input_params->cur_min_cost;
     return RESAULT_LEVEL::BAD;
   }
 
   if (input_params->final_cost < perfect_threshold) {
-    MLOG() << "get a perfect result = "
+    LOG(ERROR) << "get a perfect result = "
       << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
       << input_params->final_cost << "," << input_params->cur_min_cost;
     return RESAULT_LEVEL::PERFECT;
@@ -478,7 +478,7 @@ RESAULT_LEVEL isResultGood(
   for (int i = 0; i < residual_cal.size(); i++) {
     residual_cal[i](res, &residuals);
     if (residuals > 1) {
-      MLOG() << "bad result because of residual["
+      LOG(ERROR) << "bad result because of residual["
              << i << "]" << residuals << "-"
              << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
              << input_params->final_cost << "," << input_params->cur_min_cost;
@@ -492,7 +492,7 @@ RESAULT_LEVEL isResultGood(
 
   if (cv::norm(rv) > angle_threshold) {
     //(0.25, 0.25, 0.25), whose rotation matrix is 0.9-0.9-0.9 tr
-    MLOG() << "too much rotation"
+    LOG(ERROR) << "too much rotation"
            << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
            << input_params->final_cost << "," << input_params->cur_min_cost;
     return RESAULT_LEVEL::BAD;
@@ -502,7 +502,7 @@ RESAULT_LEVEL isResultGood(
 
   double tr = cv::trace(rotation);
   if (tr < tr_threshold) {
-    MLOG() << "Too small tr " << tr << "\n" << rotation
+    LOG(ERROR) << "Too small tr " << tr << "\n" << rotation
            << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
            << input_params->final_cost << "," << input_params->cur_min_cost;
     return RESAULT_LEVEL::BAD;
@@ -528,7 +528,7 @@ RESAULT_LEVEL isResultGood(
         double uv[2] = { lines[i][j].x, lines[i][j].y };
         Camera::GetPoint3d(m_Matrix.val, uv, res[3], points3d[i][j].data());
         if (points3d[i][j][2] < 0) {
-          MLOG() << "all z value should be positive [" << points3d[i][j][0] << ","
+          LOG(ERROR) << "all z value should be positive [" << points3d[i][j][0] << ","
                  << points3d[i][j][1] << "," << points3d[i][j][2] << "]"
                  << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
                  << input_params->final_cost << "," << input_params->cur_min_cost;
@@ -539,7 +539,7 @@ RESAULT_LEVEL isResultGood(
       if (i > 0) {
         if (std_distance[i - 1] > 0 &&
             (points3d[i][0][cmp_idx] - points3d[i - 1][0][cmp_idx] - std_distance[i - 1] > 0.5)) {
-          MLOG() << "two line distance is too much " << i << "=" << points3d[i][0][0]
+          LOG(ERROR) << "two line distance is too much " << i << "=" << points3d[i][0][0]
                  << "," << points3d[i - 1][0][0] << ","
                  << points3d[i][0][0] - points3d[i - 1][0][0]
                  << "\n[" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
@@ -560,7 +560,7 @@ RESAULT_LEVEL isResultGood(
     return RESAULT_LEVEL::BAD;
   }
 
-  MLOG() << "get a good start [" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
+  LOG(ERROR) << "get a good start [" << res[0] << "," << res[1] << "," << res[2] << "," << res[3] << "],"
          << input_params->final_cost << "," << input_params->cur_min_cost;
 
   return RESAULT_LEVEL::GOOD;
@@ -622,7 +622,7 @@ bool Optimize(
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
   if (log_type != ceres::SILENT) {
-    MLOG() << summary.BriefReport();
+    LOG(ERROR) << summary.BriefReport();
   }
 
   if (summary.termination_type == ceres::CONVERGENCE) {
@@ -631,7 +631,7 @@ bool Optimize(
 
     if (input_params.final_cost < input_params.cur_min_cost
         && RESAULT_LEVEL::GOOD >= isResultGood(&input_params)) {
-      MLOG() << "final_cost " << input_params.final_cost;
+      LOG(ERROR) << "final_cost " << input_params.final_cost;
       //only if this is a better result than current
       input_params.cur_min_cost = input_params.final_cost;
       input_params.best = input_params.res;
@@ -850,7 +850,7 @@ bool optimize_from_good(Params &parameters) {
     if ((current_result_level == RESAULT_LEVEL::BAD)
         || ((current_result_level == RESAULT_LEVEL::GOOD) && parameters.isEqualtoBest(cur_best, cur_min_cost))) {
       //bad result or the same iterate
-      MLOG() << "stop this good start";
+      LOG(ERROR) << "stop this good start";
       return false;
     } else {
       LOG(ERROR) << "count " << c++;
@@ -871,7 +871,7 @@ int main(int argc, char **argv) {
     rand_seed = time(0);
   }
   srand(rand_seed);
-  MLOG() << "rand seed = " << rand_seed;
+  LOG(ERROR) << "rand seed = " << rand_seed;
 
   auto camera_ptr = Camera::create(camera_file);
   PointsInputOutput io_helper(FLAGS_data);

@@ -152,7 +152,7 @@ int main() {
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
 
-  MLOG() << summary.BriefReport();
+  LOG(ERROR) << summary.BriefReport();
 
   const cv::Matx22d R21_new = extrinsics.RotateMatrix();
   const cv::Vec2d t21_new = extrinsics._t21;
