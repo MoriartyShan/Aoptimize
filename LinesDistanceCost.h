@@ -12,25 +12,25 @@
 
 class ZLineDistance {
 private:
-  std::vector<cv::Point2d> _line1;
-  std::vector<cv::Point2d> _line2;
-  cv::Matx33d _cameraK;
-  double _distance;
+  std::vector<Pixel2f> _line1;
+  std::vector<Pixel2f> _line2;
+  Matrix33 _cameraK;
+  scalar _distance;
 public:
   static ceres::CostFunction* Create(
-      const cv::Matx33d& cameraK,
-      const double distance,
-      const std::vector<cv::Point2d>& line1,
-      const std::vector<cv::Point2d>& line2) {
+      const Matrix33& cameraK,
+      const scalar distance,
+      const std::vector<Pixel2f>& line1,
+      const std::vector<Pixel2f>& line2) {
     return (new ceres::AutoDiffCostFunction<ZLineDistance, 1, 3, 1>(
         new ZLineDistance(cameraK, distance, line1, line2)));
   }
 
   ZLineDistance(
-      const cv::Matx33d& cameraK,
-      const double distance,
-      const std::vector<cv::Point2d>& line1,
-      const std::vector<cv::Point2d>& line2) {
+      const Matrix33& cameraK,
+      const scalar distance,
+      const std::vector<Pixel2f>& line1,
+      const std::vector<Pixel2f>& line2) {
     _cameraK = cameraK;
     _distance = distance;
     _line1 = line1;

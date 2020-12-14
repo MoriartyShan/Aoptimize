@@ -3,14 +3,6 @@ project(CameraAndHolderCalibrate)
 find_package(Ceres REQUIRED)
 find_package(OpenCV REQUIRED)
 
-file(GLOB HEADER_FILES include/*.h)
-file(GLOB SOURCE_FILES src/*.cpp)
-
-add_executable(${PROJECT_NAME} ${SOURCE_FILES} main.cpp)
-target_link_libraries(${PROJECT_NAME}
-      ceres
-	  ${OpenCV_LIBS}
-)
 project(CameraAndHolderCalibrateOneImage)
 add_executable(${PROJECT_NAME} ${SOURCE_FILES} plain.cpp)
 target_link_libraries(${PROJECT_NAME}
@@ -20,12 +12,6 @@ target_link_libraries(${PROJECT_NAME}
 )
 project(TwoCameraExtrinsics)
 add_executable(${PROJECT_NAME} ${SOURCE_FILES} two_camera.cpp)
-target_link_libraries(${PROJECT_NAME}
-		ceres
-		common
-		)
-project(OneCameraExtrinsicSeperateLines)
-add_executable(${PROJECT_NAME} ${SOURCE_FILES} seperate_lines.cpp)
 target_link_libraries(${PROJECT_NAME}
 		ceres
 		common

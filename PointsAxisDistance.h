@@ -13,27 +13,27 @@
 
 class PointAxisDistance {
 private:
-  const cv::Point2d _point1;
-  const cv::Point2d _point2;
-  const cv::Matx33d _cameraK;
-  const double _distance;
+  const Pixel2f _point1;
+  const Pixel2f _point2;
+  const Matrix33 _cameraK;
+  const scalar _distance;
   const int _axis;//0-x, 1-z
 public:
   static ceres::CostFunction* Create(
-      const cv::Point2d& point1,
-      const cv::Point2d& point2,
-      const cv::Matx33d& cameraK,
-      const double distance,
+      const Pixel2f& point1,
+      const Pixel2f& point2,
+      const Matrix33& cameraK,
+      const scalar distance,
       const int axis) {
     return (new ceres::AutoDiffCostFunction<PointAxisDistance, 2, 3, 1>(
         new PointAxisDistance(point1, point2, cameraK, distance, axis)));
   }
 
   PointAxisDistance(
-      const cv::Point2d& point1,
-      const cv::Point2d& point2,
-      const cv::Matx33d& cameraK,
-      const double distance,
+      const Pixel2f& point1,
+      const Pixel2f& point2,
+      const Matrix33& cameraK,
+      const scalar distance,
       const int axis) :
       _point1(point1), _point2(point2), _cameraK(cameraK),
       _distance(distance), _axis(axis) {};

@@ -38,7 +38,7 @@ std::array<T, 2> GetDeviation(const std::vector<std::array<T, 2>> &vectors, cons
 }
 
 template<typename T>
-void InsertMatrixToPointer(const cv::Matx33d &m, T *elem) {
+void InsertMatrixToPointer(const Matrix33 &m, T *elem) {
   for (int i = 0; i < 3; i++) {
     for (int j = 0; j < 3; j++) {
       elem[i * 3 + j] = (T)m(i, j);

@@ -13,23 +13,23 @@
 
 class PointAtAxisLine {
 private:
-  const cv::Point2d _point;
-  const cv::Matx33d _cameraK;
+  const Pixel2f _point;
+  const Matrix33 _cameraK;
   const int _axis;//0-x, 1-z
 public:
   static ceres::CostFunction* Create(
-      const cv::Point2d& point, const cv::Matx33d& cameraK, const int axis) {
+      const Pixel2f& point, const Matrix33& cameraK, const int axis) {
     return (new ceres::AutoDiffCostFunction<PointAtAxisLine, 2, 3, 1, 1>(
         new PointAtAxisLine(point, cameraK, axis)));
   }
   static ceres::CostFunction* CreateCompact(
-      const cv::Point2d& point, const cv::Matx33d& cameraK, const int axis) {
+      const Pixel2f& point, const Matrix33& cameraK, const int axis) {
     return (new ceres::AutoDiffCostFunction<PointAtAxisLine, 2, 4, 1>(
         new PointAtAxisLine(point, cameraK, axis)));
   }
 
   PointAtAxisLine(
-      const cv::Point2d& point, const cv::Matx33d& cameraK, const int axis) :
+      const Pixel2f& point, const Matrix33& cameraK, const int axis) :
       _point(point), _cameraK(cameraK), _axis(axis) {
 //    LOG(ERROR) << "points = " << point;
   };
